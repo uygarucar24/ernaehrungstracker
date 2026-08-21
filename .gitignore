@@ -22,3 +22,11 @@ data/*.xlsx
 .idea/
 .DS_Store
 Thumbs.db
+
+# Erzeugte Datenbank
+tracker.db
+*.db
+
+# BLS-Quelldateien (nicht weitergeben, vom MRI beziehen)
+BLS_4_0_*.xlsx
+BLS_4_0_*.pdf

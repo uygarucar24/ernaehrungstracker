@@ -1,0 +1,354 @@
+"""Einmaliger Import des Bundeslebensmittelschluessels 4.0 in tracker.db.
+
+Nicht Teil der Anwendung. Liest BLS_4_0_Daten_2025_DE.xlsx und befuellt die
+Tabellen lebensmittel, naehrstoff und naehrwert.
+
+Grundregel: Unbekannt ist nicht null. Enthaelt eine Wertzelle einen Strich, "TR",
+eine Angabe unterhalb der Nachweis- oder Bestimmungsgrenze oder ist sie leer, wird
+KEINE Zeile in naehrwert angelegt. Eine echte 0 aus der Quelle wird gespeichert.
+
+Aufruf:
+    python import_bls.py
+    python import_bls.py --ersetzen      # vorhandene BLS-Daten vorher entfernen
+"""
+
+import argparse
+import sqlite3
+import sys
+from collections import Counter
+from pathlib import Path
+
+try:
+    import openpyxl
+except ImportError:
+    sys.exit("openpyxl fehlt. Installieren mit: pip install openpyxl")
+
+
+BASIS = Path(__file__).resolve().parent
+QUELLE = BASIS / "BLS_4_0_Daten_2025_DE.xlsx"
+DATENBANK = BASIS / "tracker.db"
+
+# Spalten der Quelldatei, 1-basiert wie in Excel
+SPALTE_CODE = 1
+SPALTE_BEZEICHNUNG = 2
+ERWARTETE_SPALTENZAHL = 418
+
+# Naehrstoffe, die uebernommen werden.
+# id, bls_spalte, name, einheit, gruppe, uebergeordnet (bls_spalte), wertspalte, herkunftsspalte
+NAEHRSTOFFE = [
+    (1, "ENERCC", "Energie", "kcal", "energie", None, 7, 8),
+    (2, "PROT625", "Protein", "g", "makronaehrstoff", None, 13, 14),
+    (3, "FAT", "Fett", "g", "makronaehrstoff", None, 16, 17),
+    (4, "FASAT", "Gesättigte Fettsäuren", "g", "fett", "FAT", 247, 248),
+    (5, "CHO", "Kohlenhydrate", "g", "makronaehrstoff", None, 19, 20),
+    (6, "SUGAR", "Zucker", "g", "kohlenhydrat", "CHO", 220, 221),
+    (7, "LACS", "Lactose", "g", "kohlenhydrat", "SUGAR", 217, 218),
+    (8, "NACL", "Salz", "g", "mineralstoff", None, 121, 122),
+]
+
+# Textmarker, die "kein Wert" bedeuten. Alles mit "<" wird gesondert behandelt.
+MARKER_OHNE_WERT = {"-", "--", "–", "—", "tr", "spuren", "n.b.", "n.a.", "k.a."}
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS lebensmittel (
+    lebensmittel_id INTEGER PRIMARY KEY,
+    herkunft        TEXT NOT NULL,
+    bls_schluessel  TEXT,
+    bezeichnung     TEXT NOT NULL,
+    basis_menge_g   REAL NOT NULL DEFAULT 100,
+    hersteller      TEXT,
+    archiviert      INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS naehrstoff (
+    naehrstoff_id    INTEGER PRIMARY KEY,
+    bls_spalte       TEXT NOT NULL,
+    name             TEXT NOT NULL,
+    einheit          TEXT NOT NULL,
+    gruppe           TEXT NOT NULL,
+    uebergeordnet_id INTEGER REFERENCES naehrstoff(naehrstoff_id)
+);
+
+CREATE TABLE IF NOT EXISTS naehrwert (
+    lebensmittel_id INTEGER NOT NULL REFERENCES lebensmittel(lebensmittel_id),
+    naehrstoff_id   INTEGER NOT NULL REFERENCES naehrstoff(naehrstoff_id),
+    wert_je_100g    REAL NOT NULL,
+    wert_herkunft   TEXT,
+    PRIMARY KEY (lebensmittel_id, naehrstoff_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_lebensmittel_bls ON lebensmittel(bls_schluessel);
+CREATE INDEX IF NOT EXISTS idx_naehrwert_naehrstoff ON naehrwert(naehrstoff_id);
+"""
+
+
+def pruefe_kopfzeile(kopf):
+    """Prueft, dass hinter jeder Spaltennummer wirklich der erwartete Code steht."""
+    fehler = []
+
+    if len(kopf) != ERWARTETE_SPALTENZAHL:
+        fehler.append(
+            f"Die Datei hat {len(kopf)} Spalten, erwartet waren {ERWARTETE_SPALTENZAHL}."
+        )
+
+    def ueberschrift(nummer):
+        if nummer > len(kopf):
+            return None
+        wert = kopf[nummer - 1]
+        return str(wert).strip() if wert is not None else None
+
+    kopf_code = ueberschrift(SPALTE_CODE)
+    if not kopf_code or not kopf_code.upper().startswith("BLS"):
+        fehler.append(f"Spalte {SPALTE_CODE} sollte der BLS-Code sein, steht aber: {kopf_code!r}")
+
+    for _, code, name, _, _, _, spalte_wert, spalte_herkunft in NAEHRSTOFFE:
+        text_wert = ueberschrift(spalte_wert)
+        text_herkunft = ueberschrift(spalte_herkunft)
+
+        if not text_wert or text_wert.split()[0] != code:
+            fehler.append(
+                f"{name}: Spalte {spalte_wert} sollte mit {code!r} beginnen, "
+                f"Ueberschrift ist aber {text_wert!r}"
+            )
+        if not text_herkunft or text_herkunft.split()[0] != code:
+            fehler.append(
+                f"{name}: Spalte {spalte_herkunft} sollte mit {code!r} beginnen, "
+                f"Ueberschrift ist aber {text_herkunft!r}"
+            )
+        elif "Datenherkunft" not in text_herkunft:
+            fehler.append(
+                f"{name}: Spalte {spalte_herkunft} sollte die Datenherkunft sein, "
+                f"Ueberschrift ist aber {text_herkunft!r}"
+            )
+
+    if fehler:
+        print("Abbruch. Der Spaltenaufbau der Quelldatei passt nicht:", file=sys.stderr)
+        for zeile in fehler:
+            print("  - " + zeile, file=sys.stderr)
+        sys.exit(1)
+
+
+def lies_wert(zelle):
+    """Gibt (wert, grund) zurueck. Genau eines von beiden ist None.
+
+    wert ist immer eine Zahl, niemals Text. grund benennt, warum uebersprungen wird.
+    """
+    if zelle is None:
+        return None, "leer"
+    if isinstance(zelle, bool):
+        return None, "unbekannt"
+    if isinstance(zelle, (int, float)):
+        return float(zelle), None
+
+    text = str(zelle).strip()
+    if not text:
+        return None, "leer"
+
+    vergleich = text.lower().replace(" ", "")
+    if vergleich in MARKER_OHNE_WERT:
+        return None, "marker"
+    if vergleich.startswith("<"):
+        # <LOD, <LOQ, <LOD or <LOQ: unterhalb Nachweis- oder Bestimmungsgrenze
+        return None, "unter_grenze"
+
+    # Zahl, die als Text in der Zelle steht (auch mit Komma als Trennzeichen)
+    try:
+        return float(text.replace(",", ".")), None
+    except ValueError:
+        return None, "unbekannt"
+
+
+def lies_text(zelle):
+    if zelle is None:
+        return None
+    text = str(zelle).strip()
+    return text or None
+
+
+def bestehende_bls_daten(verbindung):
+    try:
+        return verbindung.execute(
+            "SELECT COUNT(*) FROM lebensmittel WHERE herkunft = 'bls'"
+        ).fetchone()[0]
+    except sqlite3.OperationalError:
+        return 0
+
+
+def entferne_bls_daten(verbindung):
+    verbindung.execute(
+        "DELETE FROM naehrwert WHERE lebensmittel_id IN "
+        "(SELECT lebensmittel_id FROM lebensmittel WHERE herkunft = 'bls')"
+    )
+    verbindung.execute("DELETE FROM lebensmittel WHERE herkunft = 'bls'")
+
+
+def schreibe_naehrstoffe(verbindung):
+    nach_code = {code: nid for nid, code, *_ in NAEHRSTOFFE}
+    for nid, code, name, einheit, gruppe, uebergeordnet, _, _ in NAEHRSTOFFE:
+        verbindung.execute(
+            "INSERT OR REPLACE INTO naehrstoff "
+            "(naehrstoff_id, bls_spalte, name, einheit, gruppe, uebergeordnet_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (nid, code, name, einheit, gruppe, nach_code.get(uebergeordnet)),
+        )
+    return nach_code
+
+
+def importiere(quelle, datenbank, ersetzen):
+    if not quelle.exists():
+        sys.exit(f"Quelldatei nicht gefunden: {quelle}")
+
+    print(f"Quelle:    {quelle}")
+    print(f"Datenbank: {datenbank}")
+
+    verbindung = sqlite3.connect(datenbank)
+    verbindung.execute("PRAGMA foreign_keys = ON")
+    verbindung.executescript(SCHEMA)
+
+    vorhanden = bestehende_bls_daten(verbindung)
+    if vorhanden and not ersetzen:
+        verbindung.close()
+        sys.exit(
+            f"Abbruch. In {datenbank.name} stehen bereits {vorhanden} BLS-Lebensmittel.\n"
+            "Erneut importieren mit: python import_bls.py --ersetzen"
+        )
+    if vorhanden:
+        print(f"Ersetze {vorhanden} vorhandene BLS-Lebensmittel.")
+        entferne_bls_daten(verbindung)
+
+    schreibe_naehrstoffe(verbindung)
+
+    mappe = openpyxl.load_workbook(quelle, read_only=True, data_only=True)
+    blatt = mappe[mappe.sheetnames[0]]
+    zeilen = blatt.iter_rows(min_row=1, values_only=True)
+
+    kopf = next(zeilen)
+    pruefe_kopfzeile(kopf)
+
+    anzahl_lebensmittel = 0
+    zeilen_gelesen = 0
+    ohne_bezeichnung = 0
+    mit_wert = Counter()
+    uebersprungen = Counter()
+    gruende = {code: Counter() for _, code, *_ in NAEHRSTOFFE}
+    unbekannte_marker = {code: Counter() for _, code, *_ in NAEHRSTOFFE}
+
+    for zeile in zeilen:
+        schluessel = lies_text(zeile[SPALTE_CODE - 1])
+        if schluessel is None:
+            continue  # Leerzeilen am Dateiende
+        zeilen_gelesen += 1
+
+        bezeichnung = lies_text(zeile[SPALTE_BEZEICHNUNG - 1])
+        if bezeichnung is None:
+            ohne_bezeichnung += 1
+            bezeichnung = schluessel
+
+        cursor = verbindung.execute(
+            "INSERT INTO lebensmittel "
+            "(herkunft, bls_schluessel, bezeichnung, basis_menge_g, hersteller, archiviert) "
+            "VALUES ('bls', ?, ?, 100, NULL, 0)",
+            (schluessel, bezeichnung),
+        )
+        lebensmittel_id = cursor.lastrowid
+        anzahl_lebensmittel += 1
+
+        for nid, code, _, _, _, _, spalte_wert, spalte_herkunft in NAEHRSTOFFE:
+            wert, grund = lies_wert(zeile[spalte_wert - 1])
+            if wert is None:
+                uebersprungen[code] += 1
+                gruende[code][grund] += 1
+                if grund == "unbekannt":
+                    unbekannte_marker[code][str(zeile[spalte_wert - 1]).strip()] += 1
+                continue
+
+            verbindung.execute(
+                "INSERT INTO naehrwert "
+                "(lebensmittel_id, naehrstoff_id, wert_je_100g, wert_herkunft) "
+                "VALUES (?, ?, ?, ?)",
+                (lebensmittel_id, nid, wert, lies_text(zeile[spalte_herkunft - 1])),
+            )
+            mit_wert[code] += 1
+
+    verbindung.commit()
+    mappe.close()
+
+    zeilen_naehrwert = verbindung.execute("SELECT COUNT(*) FROM naehrwert").fetchone()[0]
+    verbindung.close()
+
+    bericht(
+        zeilen_gelesen,
+        anzahl_lebensmittel,
+        ohne_bezeichnung,
+        zeilen_naehrwert,
+        mit_wert,
+        uebersprungen,
+        gruende,
+        unbekannte_marker,
+    )
+
+
+def bericht(
+    zeilen_gelesen,
+    anzahl_lebensmittel,
+    ohne_bezeichnung,
+    zeilen_naehrwert,
+    mit_wert,
+    uebersprungen,
+    gruende,
+    unbekannte_marker,
+):
+    print()
+    print("Import abgeschlossen")
+    print(f"  Datenzeilen gelesen:       {zeilen_gelesen}")
+    print(f"  Lebensmittel importiert:   {anzahl_lebensmittel}")
+    print(f"  Zeilen in naehrwert:       {zeilen_naehrwert}")
+    if ohne_bezeichnung:
+        print(f"  Ohne Bezeichnung (Schluessel eingesetzt): {ohne_bezeichnung}")
+
+    print()
+    kopf = f"  {'Naehrstoff':<28}{'Code':<10}{'mit Wert':>10}{'uebersprungen':>15}   Gruende"
+    print(kopf)
+    print("  " + "-" * (len(kopf) - 2))
+    for _, code, name, einheit, _, _, _, _ in NAEHRSTOFFE:
+        aufschluesselung = ", ".join(
+            f"{grund_text(g)}: {n}" for g, n in sorted(gruende[code].items())
+        )
+        print(
+            f"  {name + ' [' + einheit + ']':<28}{code:<10}"
+            f"{mit_wert[code]:>10}{uebersprungen[code]:>15}   {aufschluesselung or '-'}"
+        )
+
+    offene_marker = {c: m for c, m in unbekannte_marker.items() if m}
+    if offene_marker:
+        print()
+        print("  ACHTUNG: nicht eingeplanter Zellinhalt, wurde uebersprungen:")
+        for code, zaehler in offene_marker.items():
+            for text, n in sorted(zaehler.items()):
+                print(f"    {code}: {text!r} ({n}x)")
+
+
+def grund_text(grund):
+    return {
+        "marker": "Strich/TR",
+        "unter_grenze": "unter Nachweisgrenze",
+        "leer": "leer",
+        "unbekannt": "unbekannter Text",
+    }.get(grund, grund)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="BLS 4.0 nach tracker.db importieren")
+    parser.add_argument("--quelle", type=Path, default=QUELLE, help="Pfad zur BLS-Excel-Datei")
+    parser.add_argument("--db", type=Path, default=DATENBANK, help="Pfad zur SQLite-Datenbank")
+    parser.add_argument(
+        "--ersetzen",
+        action="store_true",
+        help="vorhandene BLS-Daten vor dem Import entfernen",
+    )
+    argumente = parser.parse_args()
+    importiere(argumente.quelle, argumente.db, argumente.ersetzen)
+
+
+if __name__ == "__main__":
+    main()
