@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+
+# Daten (lokale Rohdaten/Exporte nicht ins Repo)
+data/*.csv
+data/*.db
+data/*.xlsx
+!data/.gitkeep
+
+# Secrets
+.env
+*.secret
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
