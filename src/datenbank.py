@@ -19,6 +19,12 @@ DATENBANK = BASIS / "tracker.db"
 # das Vorzeichen von aenderung_kg_woche setzt die Anwendung daraus.
 ZIEL_MODI = ("abnehmen", "zunehmen", "halten")
 
+# Feste Werteliste, kein Freitext.
+TAGESABSCHNITTE = ("fruehstueck", "mittag", "abend", "snack")
+
+# Bezugsmenge der Nährwerte: naehrwert.wert_je_100g gilt je 100 Gramm.
+BEZUGSMENGE_G = 100.0
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS profil (
     profil_id          INTEGER PRIMARY KEY,
@@ -39,6 +45,26 @@ CREATE TABLE IF NOT EXISTS gewicht (
     notiz      TEXT,
     PRIMARY KEY (profil_id, datum)
 );
+
+CREATE TABLE IF NOT EXISTS mahlzeit (
+    mahlzeit_id    INTEGER PRIMARY KEY,
+    profil_id      INTEGER NOT NULL REFERENCES profil(profil_id),
+    datum          DATE NOT NULL,
+    tagesabschnitt TEXT NOT NULL,
+    UNIQUE (profil_id, datum, tagesabschnitt)
+);
+
+CREATE TABLE IF NOT EXISTS mahlzeit_position (
+    position_id      INTEGER PRIMARY KEY,
+    mahlzeit_id      INTEGER NOT NULL REFERENCES mahlzeit(mahlzeit_id),
+    lebensmittel_id  INTEGER NOT NULL REFERENCES lebensmittel(lebensmittel_id),
+    menge_g          REAL NOT NULL,
+    uhrzeit          TIME,
+    eingabe_original TEXT,
+    zuordnung_weg    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_position_mahlzeit ON mahlzeit_position(mahlzeit_id);
 
 CREATE TABLE IF NOT EXISTS unvertraeglichkeit (
     unvertraeglichkeit_id INTEGER PRIMARY KEY,
@@ -175,6 +201,141 @@ def naehrstoff_id(bls_spalte: str) -> int | None:
         except sqlite3.OperationalError:
             return None  # naehrstoff gibt es noch nicht, import_bls.py fehlt
     return zeile["naehrstoff_id"] if zeile else None
+
+
+# --------------------------------------------------------------------------- #
+# Lebensmittel, Nährstoffe, Mahlzeiten
+# --------------------------------------------------------------------------- #
+def lebensmittel_suchen(text: str, grenze: int = 50) -> list[sqlite3.Row]:
+    """Einfache Textsuche in lebensmittel.bezeichnung, ohne KI.
+
+    Alle Suchbegriffe müssen vorkommen, Reihenfolge und Groß-/Kleinschreibung
+    spielen keine Rolle. Mitgeliefert werden die Kilokalorien je 100 Gramm,
+    damit die Auswahl nachvollziehbar ist; fehlen sie, steht dort None.
+    """
+    begriffe = [teil for teil in text.lower().split() if teil]
+    if not begriffe:
+        return []
+
+    bedingungen = " AND ".join(["klein(l.bezeichnung) LIKE ?"] * len(begriffe))
+    with verbindung() as con:
+        # SQLite kennt kleingeschriebene Umlaute nicht, deshalb Pythons lower().
+        con.create_function("klein", 1, lambda wert: (wert or "").lower())
+        return con.execute(
+            "SELECT l.lebensmittel_id, l.bezeichnung, ("
+            "  SELECT w.wert_je_100g FROM naehrwert w JOIN naehrstoff n"
+            "  ON n.naehrstoff_id = w.naehrstoff_id"
+            "  WHERE w.lebensmittel_id = l.lebensmittel_id AND n.bls_spalte = 'ENERCC'"
+            ") AS kcal_je_100g "
+            "FROM lebensmittel l "
+            f"WHERE l.archiviert = 0 AND {bedingungen} "
+            "ORDER BY LENGTH(l.bezeichnung), l.bezeichnung LIMIT ?",
+            [f"%{begriff}%" for begriff in begriffe] + [grenze],
+        ).fetchall()
+
+
+def naehrstoffe(codes: tuple[str, ...]) -> dict[str, sqlite3.Row]:
+    """Stammdaten je BLS-Code. Die Einheit steht ausschließlich in naehrstoff."""
+    platzhalter = ",".join("?" * len(codes))
+    with verbindung() as con:
+        zeilen = con.execute(
+            f"SELECT naehrstoff_id, bls_spalte, name, einheit FROM naehrstoff "
+            f"WHERE bls_spalte IN ({platzhalter})",
+            codes,
+        ).fetchall()
+    return {zeile["bls_spalte"]: zeile for zeile in zeilen}
+
+
+def naehrwerte(lebensmittel_ids: list[int], codes: tuple[str, ...]) -> dict[tuple[int, str], float]:
+    """Werte je 100 Gramm für mehrere Lebensmittel auf einmal.
+
+    Fehlt ein Wert, fehlt auch der Schlüssel. Kein Eintrag bedeutet unbekannt,
+    niemals 0.
+    """
+    if not lebensmittel_ids:
+        return {}
+    lm_platzhalter = ",".join("?" * len(lebensmittel_ids))
+    code_platzhalter = ",".join("?" * len(codes))
+    with verbindung() as con:
+        zeilen = con.execute(
+            "SELECT w.lebensmittel_id, n.bls_spalte, w.wert_je_100g "
+            "FROM naehrwert w JOIN naehrstoff n ON n.naehrstoff_id = w.naehrstoff_id "
+            f"WHERE w.lebensmittel_id IN ({lm_platzhalter}) "
+            f"AND n.bls_spalte IN ({code_platzhalter})",
+            list(lebensmittel_ids) + list(codes),
+        ).fetchall()
+    return {(z["lebensmittel_id"], z["bls_spalte"]): z["wert_je_100g"] for z in zeilen}
+
+
+def mahlzeit_positionen(profil_id: int, datum: date, tagesabschnitt: str) -> list[sqlite3.Row]:
+    """Positionen einer Mahlzeit in der Reihenfolge ihrer Erfassung."""
+    with verbindung() as con:
+        return con.execute(
+            "SELECT p.position_id, p.lebensmittel_id, p.menge_g, l.bezeichnung "
+            "FROM mahlzeit_position p "
+            "JOIN mahlzeit m ON m.mahlzeit_id = p.mahlzeit_id "
+            "JOIN lebensmittel l ON l.lebensmittel_id = p.lebensmittel_id "
+            "WHERE m.profil_id = ? AND m.datum = ? AND m.tagesabschnitt = ? "
+            "ORDER BY p.position_id",
+            (profil_id, datum.isoformat(), tagesabschnitt),
+        ).fetchall()
+
+
+def position_hinzufuegen(
+    profil_id: int,
+    datum: date,
+    tagesabschnitt: str,
+    lebensmittel_id: int,
+    menge_g: float,
+    zuordnung_weg: str = "direkt",
+) -> int:
+    """Hängt eine Position an die Mahlzeit und legt sie an, falls es sie nicht gibt.
+
+    Je Profil, Datum und Tagesabschnitt gibt es genau eine Mahlzeit; die Regel
+    steht als UNIQUE in der Datenbank. Gespeichert werden nur Lebensmittel und
+    Menge, keine berechneten Nährwerte.
+    """
+    if tagesabschnitt not in TAGESABSCHNITTE:
+        raise DatenFehler(f"Unbekannter Tagesabschnitt: {tagesabschnitt!r}")
+    if menge_g <= 0:
+        raise DatenFehler("Die Menge muss größer als 0 Gramm sein.")
+
+    with verbindung() as con:
+        con.execute(
+            "INSERT OR IGNORE INTO mahlzeit (profil_id, datum, tagesabschnitt) VALUES (?, ?, ?)",
+            (profil_id, datum.isoformat(), tagesabschnitt),
+        )
+        mahlzeit_id = con.execute(
+            "SELECT mahlzeit_id FROM mahlzeit "
+            "WHERE profil_id = ? AND datum = ? AND tagesabschnitt = ?",
+            (profil_id, datum.isoformat(), tagesabschnitt),
+        ).fetchone()["mahlzeit_id"]
+
+        cursor = con.execute(
+            "INSERT INTO mahlzeit_position (mahlzeit_id, lebensmittel_id, menge_g, "
+            "uhrzeit, eingabe_original, zuordnung_weg) VALUES (?, ?, ?, NULL, NULL, ?)",
+            (mahlzeit_id, lebensmittel_id, float(menge_g), zuordnung_weg),
+        )
+    return cursor.lastrowid
+
+
+def position_loeschen(position_id: int) -> None:
+    """Löscht eine einzelne Position und räumt eine leer gewordene Mahlzeit weg."""
+    with verbindung() as con:
+        eintrag = con.execute(
+            "SELECT mahlzeit_id FROM mahlzeit_position WHERE position_id = ?",
+            (position_id,),
+        ).fetchone()
+        if eintrag is None:
+            return
+
+        con.execute("DELETE FROM mahlzeit_position WHERE position_id = ?", (position_id,))
+        rest = con.execute(
+            "SELECT COUNT(*) AS anzahl FROM mahlzeit_position WHERE mahlzeit_id = ?",
+            (eintrag["mahlzeit_id"],),
+        ).fetchone()["anzahl"]
+        if rest == 0:
+            con.execute("DELETE FROM mahlzeit WHERE mahlzeit_id = ?", (eintrag["mahlzeit_id"],))
 
 
 # --------------------------------------------------------------------------- #

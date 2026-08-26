@@ -115,6 +115,11 @@ Genau eine Mahlzeit je Profil, Datum und Tagesabschnitt. Als UNIQUE-Regel in der
 Datenbank hinterlegen, nicht nur im Code. Wird später etwas ergänzt, wird eine Position
 an die bestehende Mahlzeit gehängt.
 
+Werteliste für `tagesabschnitt`: `fruehstueck`, `mittag`, `abend`, `snack`. Sie steht in
+`datenbank.TAGESABSCHNITTE` und wird beim Schreiben geprüft. Bewusst keine CHECK-Regel in
+der Tabelle, weil sich die Liste in SQLite sonst nur über einen Tabellenumbau erweitern
+lässt.
+
 ### mahlzeit_position
 | Spalte | Typ | Hinweis |
 |---|---|---|
