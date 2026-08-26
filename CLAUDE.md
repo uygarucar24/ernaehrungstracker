@@ -147,8 +147,13 @@ ergeben zusammen die Arbeitszeit.
 | Spalte | Typ | Hinweis |
 |---|---|---|
 | sportart_id | INTEGER PK | |
+| code | TEXT UNIQUE | Code der Quelle, als Text wegen führender Nullen |
 | name | TEXT | Granularität der Quelle |
 | met_wert | REAL | aus dem Compendium of Physical Activities |
+| quelle | TEXT | Quellencode aus der CSV |
+
+Befüllt aus `daten/sportarten.csv` über `import_sportarten.py`. Ein zweiter Lauf
+aktualisiert vorhandene Codes, statt Duplikate anzulegen.
 
 ### sporteinheit
 | Spalte | Typ |
@@ -185,6 +190,12 @@ ergeben zusammen die Arbeitszeit.
 | sport_kcal | REAL | Mehrverbrauch über dem Ruheumsatz |
 | bedarf_kcal | REAL | |
 | berechnet_am | DATETIME | |
+
+`tagesbedarf` ist ein festgehaltenes Ergebnis, keine Quelle. Damit es nicht veraltet,
+rechnet **jeder Lesezugriff** (`datenbank.tagesbedarf`) aus Gewicht, Aktivität und
+Sporteinheiten neu und schreibt das Ergebnis mit neuem `berechnet_am` zurück. Ändert sich
+eines der drei nachträglich, steht beim nächsten Lesen bereits der neue Wert. Fällt die
+Aktivität weg, wird die Zeile gelöscht.
 
 ### ki_hinweis
 | Spalte | Typ | Hinweis |

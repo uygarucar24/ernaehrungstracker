@@ -7,7 +7,7 @@ from __future__ import annotations
 import streamlit as st
 
 from src import datenbank
-from src.seiten import mahlzeiten, profil
+from src.seiten import aktivitaet, mahlzeiten, profil
 
 st.set_page_config(
     page_title="Ernährungs- und Bewegungstracker",
@@ -67,6 +67,7 @@ navigation = st.navigation(
             default=True,
         ),
         st.Page(mahlzeiten.seite, title="Mahlzeiten", icon="🍽️", url_path="mahlzeiten"),
+        st.Page(aktivitaet.seite, title="Aktivität", icon="🏃", url_path="aktivitaet"),
     ]
 )
 navigation.run()

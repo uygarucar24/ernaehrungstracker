@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Iterator
+
+from . import berechnung
 
 BASIS = Path(__file__).resolve().parent.parent
 DATENBANK = BASIS / "tracker.db"
@@ -43,6 +45,45 @@ CREATE TABLE IF NOT EXISTS gewicht (
     datum      DATE NOT NULL,
     gewicht_kg REAL NOT NULL,
     notiz      TEXT,
+    PRIMARY KEY (profil_id, datum)
+);
+
+CREATE TABLE IF NOT EXISTS tag_aktivitaet (
+    profil_id         INTEGER NOT NULL REFERENCES profil(profil_id),
+    datum             DATE NOT NULL,
+    min_sitzend       INTEGER NOT NULL,
+    min_stehend       INTEGER NOT NULL,
+    min_veranstaltung INTEGER NOT NULL,
+    PRIMARY KEY (profil_id, datum)
+);
+
+CREATE TABLE IF NOT EXISTS sportart (
+    sportart_id INTEGER PRIMARY KEY,
+    code        TEXT NOT NULL UNIQUE,
+    name        TEXT NOT NULL,
+    met_wert    REAL NOT NULL,
+    quelle      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS sporteinheit (
+    einheit_id  INTEGER PRIMARY KEY,
+    profil_id   INTEGER NOT NULL REFERENCES profil(profil_id),
+    datum       DATE NOT NULL,
+    sportart_id INTEGER NOT NULL REFERENCES sportart(sportart_id),
+    dauer_min   INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sporteinheit_tag ON sporteinheit(profil_id, datum);
+
+CREATE TABLE IF NOT EXISTS tagesbedarf (
+    profil_id            INTEGER NOT NULL REFERENCES profil(profil_id),
+    datum                DATE NOT NULL,
+    gewicht_kg_verwendet REAL NOT NULL,
+    grundumsatz_kcal     REAL NOT NULL,
+    aktivitaet_kcal      REAL NOT NULL,
+    sport_kcal           REAL NOT NULL,
+    bedarf_kcal          REAL NOT NULL,
+    berechnet_am         DATETIME NOT NULL,
     PRIMARY KEY (profil_id, datum)
 );
 
@@ -336,6 +377,171 @@ def position_loeschen(position_id: int) -> None:
         ).fetchone()["anzahl"]
         if rest == 0:
             con.execute("DELETE FROM mahlzeit WHERE mahlzeit_id = ?", (eintrag["mahlzeit_id"],))
+
+
+# --------------------------------------------------------------------------- #
+# Tagesaktivität, Sport und Tagesbedarf
+# --------------------------------------------------------------------------- #
+def tag_aktivitaet(profil_id: int, datum: date) -> sqlite3.Row | None:
+    """Haltungsanteile eines Tages. None bedeutet: für den Tag nichts erfasst."""
+    with verbindung() as con:
+        return con.execute(
+            "SELECT * FROM tag_aktivitaet WHERE profil_id = ? AND datum = ?",
+            (profil_id, datum.isoformat()),
+        ).fetchone()
+
+
+def tag_aktivitaet_speichern(
+    profil_id: int, datum: date, min_sitzend: int, min_stehend: int, min_veranstaltung: int
+) -> None:
+    minuten = (int(min_sitzend), int(min_stehend), int(min_veranstaltung))
+    if any(wert < 0 for wert in minuten):
+        raise DatenFehler("Minuten können nicht negativ sein.")
+    if sum(minuten) > 24 * 60:
+        raise DatenFehler("Die Anteile ergeben zusammen mehr als 24 Stunden.")
+
+    with verbindung() as con:
+        con.execute(
+            "INSERT INTO tag_aktivitaet (profil_id, datum, min_sitzend, min_stehend, "
+            "min_veranstaltung) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT (profil_id, datum) DO UPDATE SET min_sitzend = excluded.min_sitzend, "
+            "min_stehend = excluded.min_stehend, min_veranstaltung = excluded.min_veranstaltung",
+            (profil_id, datum.isoformat(), *minuten),
+        )
+
+
+def tag_aktivitaet_loeschen(profil_id: int, datum: date) -> None:
+    """Löscht den Tageseintrag und den daraus abgeleiteten Bedarf."""
+    with verbindung() as con:
+        con.execute(
+            "DELETE FROM tag_aktivitaet WHERE profil_id = ? AND datum = ?",
+            (profil_id, datum.isoformat()),
+        )
+        con.execute(
+            "DELETE FROM tagesbedarf WHERE profil_id = ? AND datum = ?",
+            (profil_id, datum.isoformat()),
+        )
+
+
+def sportarten() -> list[sqlite3.Row]:
+    """Katalog aus import_sportarten.py. Leer, wenn der Import noch nicht lief."""
+    with verbindung() as con:
+        try:
+            return con.execute(
+                "SELECT sportart_id, code, name, met_wert FROM sportart ORDER BY name"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+
+
+def sporteinheiten(profil_id: int, datum: date) -> list[sqlite3.Row]:
+    with verbindung() as con:
+        try:
+            return con.execute(
+                "SELECT e.einheit_id, e.dauer_min, s.name, s.met_wert "
+                "FROM sporteinheit e JOIN sportart s ON s.sportart_id = e.sportart_id "
+                "WHERE e.profil_id = ? AND e.datum = ? ORDER BY e.einheit_id",
+                (profil_id, datum.isoformat()),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+
+
+def sporteinheit_hinzufuegen(
+    profil_id: int, datum: date, sportart_id: int, dauer_min: int
+) -> int:
+    if dauer_min <= 0:
+        raise DatenFehler("Die Dauer muss größer als 0 Minuten sein.")
+    with verbindung() as con:
+        cursor = con.execute(
+            "INSERT INTO sporteinheit (profil_id, datum, sportart_id, dauer_min) "
+            "VALUES (?, ?, ?, ?)",
+            (profil_id, datum.isoformat(), sportart_id, int(dauer_min)),
+        )
+    return cursor.lastrowid
+
+
+def sporteinheit_loeschen(einheit_id: int) -> None:
+    with verbindung() as con:
+        con.execute("DELETE FROM sporteinheit WHERE einheit_id = ?", (einheit_id,))
+
+
+def gewicht_bis(profil_id: int, datum: date) -> sqlite3.Row | None:
+    """Zuletzt bekanntes Gewicht vor oder an diesem Datum."""
+    with verbindung() as con:
+        return con.execute(
+            "SELECT datum, gewicht_kg FROM gewicht WHERE profil_id = ? AND datum <= ? "
+            "ORDER BY datum DESC LIMIT 1",
+            (profil_id, datum.isoformat()),
+        ).fetchone()
+
+
+def tagesbedarf(profil_id: int, datum: date) -> sqlite3.Row | None:
+    """Tagesbedarf eines Tages, immer frisch gerechnet und dann festgehalten.
+
+    Der gespeicherte Wert kann so nicht veralten: jeder Lesezugriff rechnet aus
+    Gewicht, Aktivität und Sporteinheiten neu und schreibt das Ergebnis mit
+    neuem berechnet_am zurück. Ändert sich später eines der drei, ist der Wert
+    beim nächsten Lesen bereits angepasst.
+
+    Gibt None zurück, wenn kein Aktivitätseintrag vorliegt, das Profil kein
+    Erwachsenenprofil ist oder kein Gewicht bis zu diesem Datum bekannt ist. In
+    diesen Fällen wird eine früher gespeicherte Zeile entfernt.
+    """
+    eintrag = profil(profil_id)
+    aktivitaet = tag_aktivitaet(profil_id, datum)
+    gewicht = gewicht_bis(profil_id, datum)
+
+    if eintrag is None or eintrag["typ"] != "erwachsen" or aktivitaet is None or gewicht is None:
+        with verbindung() as con:
+            con.execute(
+                "DELETE FROM tagesbedarf WHERE profil_id = ? AND datum = ?",
+                (profil_id, datum.isoformat()),
+            )
+        return None
+
+    gewicht_kg = gewicht["gewicht_kg"]
+    grundumsatz = berechnung.grundumsatz_kcal(
+        geschlecht=eintrag["geschlecht"],
+        gewicht_kg=gewicht_kg,
+        groesse_cm=eintrag["groesse_cm"],
+        alter_jahre=berechnung.alter_in_jahren(date.fromisoformat(eintrag["geburtsdatum"]), datum),
+    )
+    aktivitaet_anteil = berechnung.aktivitaet_kcal(
+        {feld: aktivitaet[feld] for feld in berechnung.HALTUNG_MET}, gewicht_kg
+    )
+    sport_anteil = sum(
+        berechnung.mehrverbrauch_kcal(einheit["met_wert"], gewicht_kg, einheit["dauer_min"])
+        for einheit in sporteinheiten(profil_id, datum)
+    )
+    bedarf = grundumsatz + aktivitaet_anteil + sport_anteil
+
+    with verbindung() as con:
+        con.execute(
+            "INSERT INTO tagesbedarf (profil_id, datum, gewicht_kg_verwendet, "
+            "grundumsatz_kcal, aktivitaet_kcal, sport_kcal, bedarf_kcal, berechnet_am) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (profil_id, datum) DO UPDATE SET "
+            "gewicht_kg_verwendet = excluded.gewicht_kg_verwendet, "
+            "grundumsatz_kcal = excluded.grundumsatz_kcal, "
+            "aktivitaet_kcal = excluded.aktivitaet_kcal, "
+            "sport_kcal = excluded.sport_kcal, bedarf_kcal = excluded.bedarf_kcal, "
+            "berechnet_am = excluded.berechnet_am",
+            (
+                profil_id,
+                datum.isoformat(),
+                gewicht_kg,
+                grundumsatz,
+                aktivitaet_anteil,
+                sport_anteil,
+                bedarf,
+                datetime.now().isoformat(timespec="seconds"),
+            ),
+        )
+        return con.execute(
+            "SELECT * FROM tagesbedarf WHERE profil_id = ? AND datum = ?",
+            (profil_id, datum.isoformat()),
+        ).fetchone()
 
 
 # --------------------------------------------------------------------------- #
