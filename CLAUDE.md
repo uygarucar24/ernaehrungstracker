@@ -37,11 +37,18 @@ unvertraeglichkeit), Anzeigetexte in der Oberfläche mit Umlauten.
 | geschlecht | TEXT | m / w |
 | groesse_cm | REAL | |
 | typ | TEXT | erwachsen / kind |
-| zielgewicht_kg | REAL NULL | bleibt bei Kinderprofilen leer |
-| aenderung_kg_woche | REAL NULL | negativ = abnehmen, positiv = zunehmen |
+| ziel_modus | TEXT NULL | abnehmen / zunehmen / halten, bei Kinderprofilen leer |
+| zielgewicht_kg | REAL NULL | leer bei Kinderprofilen und bei `halten` |
+| aenderung_kg_woche | REAL NULL | Vorzeichen setzt die App aus `ziel_modus`, leer bei `halten` |
 
 Kein Gewichtsfeld. Das bei der Anlage eingegebene Gewicht wird als erste Zeile in
 `gewicht` geschrieben.
+
+Eingegeben wird nur das Tempo ohne Vorzeichen. Die Richtung steckt allein in
+`ziel_modus`, damit Ziel und Rate sich nicht widersprechen können. Beim Abnehmen muss
+das Zielgewicht unter, beim Zunehmen über dem aktuellen Gewicht liegen. Ist das
+Zielgewicht erreicht, stellt die Anwendung auf `halten` um und leert Zielgewicht und
+Rate.
 
 ### lebensmittel
 | Spalte | Typ | Hinweis |

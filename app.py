@@ -19,6 +19,7 @@ st.set_page_config(
 
 GESCHLECHT_ANZEIGE = {"m": "männlich", "w": "weiblich"}
 TYP_ANZEIGE = {"erwachsen": "Erwachsen", "kind": "Kind"}
+ZIEL_ANZEIGE = {"abnehmen": "Abnehmen", "zunehmen": "Zunehmen", "halten": "Gewicht halten"}
 
 datenbank.schema_anlegen()
 
@@ -80,6 +81,9 @@ def seitenleiste(vorhandene: list) -> None:
 # Übersicht des aktiven Profils
 # --------------------------------------------------------------------------- #
 def zeige_uebersicht(profil_id: int) -> None:
+    # Erreichtes Zielgewicht stellt den Modus auf halten, bevor gelesen wird.
+    umgestellt = datenbank.ziel_status_aktualisieren(profil_id)
+
     eintrag = datenbank.profil(profil_id)
     if eintrag is None:
         st.warning("Das gewählte Profil ist nicht mehr vorhanden.")
@@ -113,14 +117,20 @@ def zeige_uebersicht(profil_id: int) -> None:
     # Erwachsenenprofilen, bei Kinderprofilen wird dazu nichts angezeigt.
     if eintrag["typ"] == "erwachsen":
         st.subheader("Ziel")
-        ziel1, ziel2 = st.columns(2)
+        if umgestellt:
+            st.info("Zielgewicht erreicht. Das Ziel steht jetzt auf Gewicht halten.")
+
+        modus = eintrag["ziel_modus"] or "halten"
         ziel = eintrag["zielgewicht_kg"]
         rate = eintrag["aenderung_kg_woche"]
-        ziel1.metric("Zielgewicht", "nicht gesetzt" if ziel is None else f"{ziel:.1f} kg")
-        ziel2.metric(
-            "Änderung je Woche",
-            "nicht gesetzt" if rate is None else f"{rate:+.2f} kg",
-        )
+
+        if modus == "halten":
+            st.metric("Richtung", ZIEL_ANZEIGE["halten"])
+        else:
+            ziel1, ziel2, ziel3 = st.columns(3)
+            ziel1.metric("Richtung", ZIEL_ANZEIGE[modus])
+            ziel2.metric("Zielgewicht", f"{ziel:.1f} kg")
+            ziel3.metric("Änderung je Woche", f"{rate:+.2f} kg")
 
     st.subheader("Unverträglichkeiten")
     eintraege = datenbank.unvertraeglichkeiten(profil_id)
@@ -188,28 +198,39 @@ def zeige_neues_profil() -> None:
         help="Wird als erster Eintrag in der Gewichtstabelle gespeichert, nicht im Profil.",
     )
 
+    ziel_modus: str | None = None
     zielgewicht_kg: float | None = None
-    aenderung_kg_woche: float | None = None
+    tempo_kg_woche: float | None = None
     if typ == "erwachsen":
         st.subheader("Ziel")
-        spalte5, spalte6 = st.columns(2)
-        zielgewicht_kg = spalte5.number_input(
-            "Zielgewicht in kg",
-            min_value=1.0,
-            max_value=400.0,
-            value=float(gewicht_kg),
-            step=0.1,
-            key="neu_zielgewicht",
+        ziel_modus = st.radio(
+            "Was ist das Ziel?",
+            list(datenbank.ZIEL_MODI),
+            format_func=lambda wert: ZIEL_ANZEIGE[wert],
+            horizontal=True,
+            key="neu_ziel_modus",
         )
-        aenderung_kg_woche = spalte6.number_input(
-            "Änderung in kg pro Woche",
-            min_value=-2.0,
-            max_value=2.0,
-            value=0.0,
-            step=0.05,
-            key="neu_aenderung",
-            help="Negativ = abnehmen, positiv = zunehmen, 0 = Gewicht halten.",
-        )
+        # Bei halten bleiben Zielgewicht und Tempo leer, die Felder erscheinen
+        # gar nicht erst. Das Vorzeichen der Rate setzt der Modus.
+        if ziel_modus != "halten":
+            spalte5, spalte6 = st.columns(2)
+            zielgewicht_kg = spalte5.number_input(
+                "Zielgewicht in kg",
+                min_value=1.0,
+                max_value=400.0,
+                value=float(gewicht_kg),
+                step=0.1,
+                key="neu_zielgewicht",
+            )
+            tempo_kg_woche = spalte6.number_input(
+                "Tempo in kg pro Woche",
+                min_value=0.05,
+                max_value=2.0,
+                value=0.5,
+                step=0.05,
+                key="neu_tempo",
+                help="Ohne Vorzeichen. Die Richtung kommt aus dem Ziel.",
+            )
 
     st.subheader("Unverträglichkeiten")
     laktose = st.checkbox("Laktoseintoleranz", key="neu_laktose")
@@ -226,8 +247,9 @@ def zeige_neues_profil() -> None:
                 groesse_cm=float(groesse_cm),
                 typ=typ,
                 gewicht_kg=float(gewicht_kg),
+                ziel_modus=ziel_modus,
                 zielgewicht_kg=zielgewicht_kg,
-                aenderung_kg_woche=aenderung_kg_woche,
+                tempo_kg_woche=tempo_kg_woche,
                 laktoseintoleranz=laktose,
             )
         except datenbank.DatenFehler as fehler:

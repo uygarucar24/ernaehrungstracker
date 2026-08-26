@@ -15,6 +15,10 @@ from typing import Iterator
 BASIS = Path(__file__).resolve().parent.parent
 DATENBANK = BASIS / "tracker.db"
 
+# Der Modus bestimmt die Richtung. Eingegeben wird nur das Tempo ohne Vorzeichen,
+# das Vorzeichen von aenderung_kg_woche setzt die Anwendung daraus.
+ZIEL_MODI = ("abnehmen", "zunehmen", "halten")
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS profil (
     profil_id          INTEGER PRIMARY KEY,
@@ -23,6 +27,7 @@ CREATE TABLE IF NOT EXISTS profil (
     geschlecht         TEXT NOT NULL,
     groesse_cm         REAL NOT NULL,
     typ                TEXT NOT NULL,
+    ziel_modus         TEXT,
     zielgewicht_kg     REAL,
     aenderung_kg_woche REAL
 );
@@ -69,6 +74,58 @@ def schema_anlegen() -> None:
     """Legt die Tabellen der Anwendung an, falls sie noch nicht existieren."""
     with verbindung() as con:
         con.executescript(SCHEMA)
+        _ziel_modus_nachruesten(con)
+
+
+def _ziel_modus_nachruesten(con: sqlite3.Connection) -> None:
+    """Ergänzt ziel_modus in älteren Datenbanken und leitet den Wert einmalig ab.
+
+    Die Richtung kommt aus dem Verhältnis von Zielgewicht zum letzten bekannten
+    Gewicht, das bisherige Vorzeichen der Rate wird verworfen. Ohne Zielgewicht
+    oder ohne Rate lässt sich keine Richtung begründen, dann gilt halten.
+    """
+    spalten = [zeile["name"] for zeile in con.execute("PRAGMA table_info(profil)")]
+    if "ziel_modus" in spalten:
+        return
+
+    con.execute("ALTER TABLE profil ADD COLUMN ziel_modus TEXT")
+
+    for zeile in con.execute(
+        "SELECT profil_id, typ, zielgewicht_kg, aenderung_kg_woche FROM profil"
+    ).fetchall():
+        if zeile["typ"] != "erwachsen":
+            con.execute(
+                "UPDATE profil SET ziel_modus = NULL, zielgewicht_kg = NULL, "
+                "aenderung_kg_woche = NULL WHERE profil_id = ?",
+                (zeile["profil_id"],),
+            )
+            continue
+
+        aktuell = con.execute(
+            "SELECT gewicht_kg FROM gewicht WHERE profil_id = ? ORDER BY datum DESC LIMIT 1",
+            (zeile["profil_id"],),
+        ).fetchone()
+
+        ziel = zeile["zielgewicht_kg"]
+        tempo = abs(zeile["aenderung_kg_woche"] or 0.0)
+        modus = "halten"
+        if ziel is not None and aktuell is not None and tempo > 0:
+            if ziel < aktuell["gewicht_kg"]:
+                modus = "abnehmen"
+            elif ziel > aktuell["gewicht_kg"]:
+                modus = "zunehmen"
+
+        if modus == "halten":
+            con.execute(
+                "UPDATE profil SET ziel_modus = 'halten', zielgewicht_kg = NULL, "
+                "aenderung_kg_woche = NULL WHERE profil_id = ?",
+                (zeile["profil_id"],),
+            )
+        else:
+            con.execute(
+                "UPDATE profil SET ziel_modus = ?, aenderung_kg_woche = ? WHERE profil_id = ?",
+                (modus, -tempo if modus == "abnehmen" else tempo, zeile["profil_id"]),
+            )
 
 
 # --------------------------------------------------------------------------- #
@@ -123,6 +180,85 @@ def naehrstoff_id(bls_spalte: str) -> int | None:
 # --------------------------------------------------------------------------- #
 # Schreiben
 # --------------------------------------------------------------------------- #
+def _ziel_pruefen(
+    ziel_modus: str | None,
+    zielgewicht_kg: float | None,
+    tempo_kg_woche: float | None,
+    gewicht_kg: float,
+) -> tuple[str, float | None, float | None]:
+    """Prüft das Ziel und setzt das Vorzeichen der Rate aus dem Modus.
+
+    Gibt (ziel_modus, zielgewicht_kg, aenderung_kg_woche) zurück. Bei halten
+    bleiben Zielgewicht und Rate leer.
+    """
+    if ziel_modus not in ZIEL_MODI:
+        raise DatenFehler(f"Unbekannter Zielmodus: {ziel_modus!r}")
+
+    if ziel_modus == "halten":
+        return "halten", None, None
+
+    if zielgewicht_kg is None or tempo_kg_woche is None:
+        raise DatenFehler("Für Abnehmen und Zunehmen werden Zielgewicht und Tempo gebraucht.")
+
+    tempo = abs(float(tempo_kg_woche))
+    if tempo == 0:
+        raise DatenFehler("Das Tempo muss größer als 0 sein. Sonst passt der Modus halten.")
+
+    if ziel_modus == "abnehmen":
+        if zielgewicht_kg >= gewicht_kg:
+            raise DatenFehler(
+                "Beim Abnehmen muss das Zielgewicht unter dem aktuellen Gewicht liegen."
+            )
+        return "abnehmen", float(zielgewicht_kg), -tempo
+
+    if zielgewicht_kg <= gewicht_kg:
+        raise DatenFehler(
+            "Beim Zunehmen muss das Zielgewicht über dem aktuellen Gewicht liegen."
+        )
+    return "zunehmen", float(zielgewicht_kg), tempo
+
+
+def ziel_status_aktualisieren(profil_id: int) -> bool:
+    """Stellt auf halten um, sobald das Zielgewicht erreicht ist.
+
+    Gibt True zurück, wenn dabei umgestellt wurde. Grundlage ist der jüngste
+    Eintrag in gewicht; ohne Gewichtseintrag bleibt alles unverändert.
+    """
+    with verbindung() as con:
+        eintrag = con.execute(
+            "SELECT typ, ziel_modus, zielgewicht_kg FROM profil WHERE profil_id = ?",
+            (profil_id,),
+        ).fetchone()
+        if (
+            eintrag is None
+            or eintrag["typ"] != "erwachsen"
+            or eintrag["ziel_modus"] not in ("abnehmen", "zunehmen")
+            or eintrag["zielgewicht_kg"] is None
+        ):
+            return False
+
+        gewicht = con.execute(
+            "SELECT gewicht_kg FROM gewicht WHERE profil_id = ? ORDER BY datum DESC LIMIT 1",
+            (profil_id,),
+        ).fetchone()
+        if gewicht is None:
+            return False
+
+        if eintrag["ziel_modus"] == "abnehmen":
+            erreicht = gewicht["gewicht_kg"] <= eintrag["zielgewicht_kg"]
+        else:
+            erreicht = gewicht["gewicht_kg"] >= eintrag["zielgewicht_kg"]
+        if not erreicht:
+            return False
+
+        con.execute(
+            "UPDATE profil SET ziel_modus = 'halten', zielgewicht_kg = NULL, "
+            "aenderung_kg_woche = NULL WHERE profil_id = ?",
+            (profil_id,),
+        )
+    return True
+
+
 def profil_anlegen(
     name: str,
     geburtsdatum: date,
@@ -130,20 +266,27 @@ def profil_anlegen(
     groesse_cm: float,
     typ: str,
     gewicht_kg: float,
+    ziel_modus: str | None,
     zielgewicht_kg: float | None,
-    aenderung_kg_woche: float | None,
+    tempo_kg_woche: float | None,
     laktoseintoleranz: bool,
 ) -> int:
     """Legt Profil, ersten Gewichtseintrag und Unverträglichkeiten gemeinsam an.
 
     Das eingegebene Gewicht steht nicht im Profil, sondern als erste Zeile in
-    gewicht mit dem heutigen Datum.
+    gewicht mit dem heutigen Datum. tempo_kg_woche wird ohne Vorzeichen
+    übergeben, das Vorzeichen ergibt sich aus ziel_modus.
     """
     # Der Profiltyp steuert, nicht das leere Feld: Kinderprofile bekommen hier
-    # ausdrücklich kein Ziel und keine Änderungsrate, egal was übergeben wurde.
+    # ausdrücklich weder Modus noch Ziel noch Rate, egal was übergeben wurde.
     if typ == "kind":
+        ziel_modus = None
         zielgewicht_kg = None
         aenderung_kg_woche = None
+    else:
+        ziel_modus, zielgewicht_kg, aenderung_kg_woche = _ziel_pruefen(
+            ziel_modus, zielgewicht_kg, tempo_kg_woche, gewicht_kg
+        )
 
     lactose_id = naehrstoff_id("LACS") if laktoseintoleranz else None
     if laktoseintoleranz and lactose_id is None:
@@ -155,13 +298,14 @@ def profil_anlegen(
     with verbindung() as con:
         cursor = con.execute(
             "INSERT INTO profil (name, geburtsdatum, geschlecht, groesse_cm, typ, "
-            "zielgewicht_kg, aenderung_kg_woche) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "ziel_modus, zielgewicht_kg, aenderung_kg_woche) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 geburtsdatum.isoformat(),
                 geschlecht,
                 groesse_cm,
                 typ,
+                ziel_modus,
                 zielgewicht_kg,
                 aenderung_kg_woche,
             ),
