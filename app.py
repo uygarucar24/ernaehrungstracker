@@ -1,0 +1,254 @@
+"""Ernährungs- und Bewegungstracker – lokale Streamlit-Anwendung.
+
+Starten mit:  streamlit run app.py
+"""
+from __future__ import annotations
+
+from datetime import date
+
+import streamlit as st
+
+from src import datenbank
+
+st.set_page_config(
+    page_title="Ernährungs- und Bewegungstracker",
+    page_icon="🥗",
+    layout="centered",
+    initial_sidebar_state="expanded",
+)
+
+GESCHLECHT_ANZEIGE = {"m": "männlich", "w": "weiblich"}
+TYP_ANZEIGE = {"erwachsen": "Erwachsen", "kind": "Kind"}
+
+datenbank.schema_anlegen()
+
+
+# --------------------------------------------------------------------------- #
+# Hilfsfunktionen
+# --------------------------------------------------------------------------- #
+def alter_in_jahren(geburtsdatum: date, stichtag: date | None = None) -> int:
+    """Alter wird berechnet, nicht gespeichert."""
+    stichtag = stichtag or date.today()
+    vorbei = (stichtag.month, stichtag.day) < (geburtsdatum.month, geburtsdatum.day)
+    return stichtag.year - geburtsdatum.year - int(vorbei)
+
+
+def als_datum(wert: str) -> date:
+    return date.fromisoformat(str(wert))
+
+
+# --------------------------------------------------------------------------- #
+# Seitenleiste: Profilwechsel
+# Das gewählte Profil bleibt über st.session_state für die Sitzung aktiv.
+# --------------------------------------------------------------------------- #
+def seitenleiste(vorhandene: list) -> None:
+    st.sidebar.title("Profil")
+
+    if not vorhandene:
+        st.sidebar.info("Noch kein Profil angelegt.")
+        st.session_state["ansicht"] = "neu"
+        return
+
+    ids = [zeile["profil_id"] for zeile in vorhandene]
+    namen = {zeile["profil_id"]: zeile["name"] for zeile in vorhandene}
+
+    if st.session_state.get("profil_id") not in ids:
+        st.session_state["profil_id"] = ids[0]
+
+    gewaehlt = st.sidebar.selectbox(
+        "Aktives Profil",
+        ids,
+        index=ids.index(st.session_state["profil_id"]),
+        format_func=lambda pid: namen[pid],
+    )
+    if gewaehlt != st.session_state["profil_id"]:
+        st.session_state["profil_id"] = gewaehlt
+        st.session_state["ansicht"] = "uebersicht"
+        st.rerun()
+
+    st.sidebar.divider()
+    if st.session_state.get("ansicht") == "neu":
+        if st.sidebar.button("Zurück zur Übersicht", use_container_width=True):
+            st.session_state["ansicht"] = "uebersicht"
+            st.rerun()
+    elif st.sidebar.button("Neues Profil anlegen", use_container_width=True):
+        st.session_state["ansicht"] = "neu"
+        st.rerun()
+
+
+# --------------------------------------------------------------------------- #
+# Übersicht des aktiven Profils
+# --------------------------------------------------------------------------- #
+def zeige_uebersicht(profil_id: int) -> None:
+    eintrag = datenbank.profil(profil_id)
+    if eintrag is None:
+        st.warning("Das gewählte Profil ist nicht mehr vorhanden.")
+        return
+
+    geburtsdatum = als_datum(eintrag["geburtsdatum"])
+    st.header(eintrag["name"])
+    st.caption(f"Profiltyp: {TYP_ANZEIGE.get(eintrag['typ'], eintrag['typ'])}")
+
+    gewicht = datenbank.letztes_gewicht(profil_id)
+
+    spalte1, spalte2, spalte3 = st.columns(3)
+    spalte1.metric("Alter", f"{alter_in_jahren(geburtsdatum)} Jahre")
+    spalte2.metric("Größe", f"{eintrag['groesse_cm']:.0f} cm")
+    if gewicht is None:
+        spalte3.metric("Gewicht", "kein Eintrag")
+    else:
+        spalte3.metric(
+            "Gewicht",
+            f"{gewicht['gewicht_kg']:.1f} kg",
+            help=f"Stand {als_datum(gewicht['datum']).strftime('%d.%m.%Y')}",
+        )
+
+    st.write(f"**Geburtsdatum:** {geburtsdatum.strftime('%d.%m.%Y')}")
+    st.write(
+        "**Geschlecht:** "
+        + GESCHLECHT_ANZEIGE.get(eintrag["geschlecht"], eintrag["geschlecht"])
+    )
+
+    # Ausdrückliche Prüfung des Typs: Ziel und Änderungsrate gibt es nur bei
+    # Erwachsenenprofilen, bei Kinderprofilen wird dazu nichts angezeigt.
+    if eintrag["typ"] == "erwachsen":
+        st.subheader("Ziel")
+        ziel1, ziel2 = st.columns(2)
+        ziel = eintrag["zielgewicht_kg"]
+        rate = eintrag["aenderung_kg_woche"]
+        ziel1.metric("Zielgewicht", "nicht gesetzt" if ziel is None else f"{ziel:.1f} kg")
+        ziel2.metric(
+            "Änderung je Woche",
+            "nicht gesetzt" if rate is None else f"{rate:+.2f} kg",
+        )
+
+    st.subheader("Unverträglichkeiten")
+    eintraege = datenbank.unvertraeglichkeiten(profil_id)
+    if not eintraege:
+        st.write("Keine hinterlegt.")
+    for zeile in eintraege:
+        st.write(
+            f"- {zeile['bezeichnung'].capitalize()} "
+            f"(Prüfweg: {zeile['pruefweg']}, Nährstoff-ID: {zeile['naehrstoff_id']})"
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Eingabemaske für ein neues Profil
+# Der Profiltyp steht bewusst außerhalb eines st.form, damit die Felder für
+# Zielgewicht und Änderungsrate bei einem Kinderprofil gar nicht erst
+# aufgebaut werden.
+# --------------------------------------------------------------------------- #
+def zeige_neues_profil() -> None:
+    st.header("Neues Profil")
+
+    typ = st.radio(
+        "Profiltyp",
+        ["erwachsen", "kind"],
+        format_func=lambda wert: TYP_ANZEIGE[wert],
+        horizontal=True,
+        key="neu_typ",
+    )
+
+    name = st.text_input("Name", key="neu_name")
+
+    spalte1, spalte2 = st.columns(2)
+    geburtsdatum = spalte1.date_input(
+        "Geburtsdatum",
+        value=date(1990, 1, 1),
+        min_value=date(1900, 1, 1),
+        max_value=date.today(),
+        format="DD.MM.YYYY",
+        key="neu_geburtsdatum",
+    )
+    geschlecht = spalte2.radio(
+        "Geschlecht",
+        ["m", "w"],
+        format_func=lambda wert: GESCHLECHT_ANZEIGE[wert],
+        horizontal=True,
+        key="neu_geschlecht",
+    )
+
+    spalte3, spalte4 = st.columns(2)
+    groesse_cm = spalte3.number_input(
+        "Größe in cm",
+        min_value=30.0,
+        max_value=250.0,
+        value=175.0,
+        step=0.5,
+        key="neu_groesse",
+    )
+    gewicht_kg = spalte4.number_input(
+        "Aktuelles Gewicht in kg",
+        min_value=1.0,
+        max_value=400.0,
+        value=75.0,
+        step=0.1,
+        key="neu_gewicht",
+        help="Wird als erster Eintrag in der Gewichtstabelle gespeichert, nicht im Profil.",
+    )
+
+    zielgewicht_kg: float | None = None
+    aenderung_kg_woche: float | None = None
+    if typ == "erwachsen":
+        st.subheader("Ziel")
+        spalte5, spalte6 = st.columns(2)
+        zielgewicht_kg = spalte5.number_input(
+            "Zielgewicht in kg",
+            min_value=1.0,
+            max_value=400.0,
+            value=float(gewicht_kg),
+            step=0.1,
+            key="neu_zielgewicht",
+        )
+        aenderung_kg_woche = spalte6.number_input(
+            "Änderung in kg pro Woche",
+            min_value=-2.0,
+            max_value=2.0,
+            value=0.0,
+            step=0.05,
+            key="neu_aenderung",
+            help="Negativ = abnehmen, positiv = zunehmen, 0 = Gewicht halten.",
+        )
+
+    st.subheader("Unverträglichkeiten")
+    laktose = st.checkbox("Laktoseintoleranz", key="neu_laktose")
+
+    if st.button("Profil anlegen", type="primary"):
+        if not name.strip():
+            st.error("Bitte einen Namen eingeben.")
+            return
+        try:
+            neue_id = datenbank.profil_anlegen(
+                name=name.strip(),
+                geburtsdatum=geburtsdatum,
+                geschlecht=geschlecht,
+                groesse_cm=float(groesse_cm),
+                typ=typ,
+                gewicht_kg=float(gewicht_kg),
+                zielgewicht_kg=zielgewicht_kg,
+                aenderung_kg_woche=aenderung_kg_woche,
+                laktoseintoleranz=laktose,
+            )
+        except datenbank.DatenFehler as fehler:
+            st.error(str(fehler))
+            return
+
+        st.session_state["profil_id"] = neue_id
+        st.session_state["ansicht"] = "uebersicht"
+        st.rerun()
+
+
+# --------------------------------------------------------------------------- #
+# Seitenaufbau
+# --------------------------------------------------------------------------- #
+st.title("Profilverwaltung")
+
+vorhandene = datenbank.profile()
+st.session_state.setdefault("ansicht", "uebersicht" if vorhandene else "neu")
+seitenleiste(vorhandene)
+
+if st.session_state["ansicht"] == "neu" or not vorhandene:
+    zeige_neues_profil()
+else:
+    zeige_uebersicht(st.session_state["profil_id"])
