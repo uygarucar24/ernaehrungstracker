@@ -1,0 +1,6 @@
+schluessel,name,met,code,quelle
+schlaf,Schlaf,1.0,07030,Compendium 2024
+sitzend,Sitzende Buerotaetigkeit,1.3,11582,Compendium 2024
+stehend,Stehende Taetigkeit,1.8,11600,Compendium 2024
+veranstaltung,Veranstaltung,4.5,11615,Compendium 2024
+alltag,Restzeit Alltag,2.2,eigene Herleitung,gewichtet aus Compendium-Werten

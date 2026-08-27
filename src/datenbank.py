@@ -51,10 +51,20 @@ CREATE TABLE IF NOT EXISTS gewicht (
 CREATE TABLE IF NOT EXISTS tag_aktivitaet (
     profil_id         INTEGER NOT NULL REFERENCES profil(profil_id),
     datum             DATE NOT NULL,
+    min_schlaf        INTEGER NOT NULL DEFAULT 0,
     min_sitzend       INTEGER NOT NULL,
     min_stehend       INTEGER NOT NULL,
     min_veranstaltung INTEGER NOT NULL,
+    tagestyp          TEXT,
     PRIMARY KEY (profil_id, datum)
+);
+
+CREATE TABLE IF NOT EXISTS met_grundwert (
+    schluessel TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    met        REAL NOT NULL,
+    code       TEXT,
+    quelle     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sportart (
@@ -142,6 +152,16 @@ def schema_anlegen() -> None:
     with verbindung() as con:
         con.executescript(SCHEMA)
         _ziel_modus_nachruesten(con)
+        # Ältere Datenbanken kennen diese Spalten noch nicht.
+        _spalte_ergaenzen(con, "tag_aktivitaet", "min_schlaf", "INTEGER NOT NULL DEFAULT 0")
+        _spalte_ergaenzen(con, "tag_aktivitaet", "tagestyp", "TEXT")
+        _spalte_ergaenzen(con, "sportart", "kategorie", "TEXT")
+
+
+def _spalte_ergaenzen(con: sqlite3.Connection, tabelle: str, spalte: str, typ: str) -> None:
+    vorhanden = [zeile["name"] for zeile in con.execute(f"PRAGMA table_info({tabelle})")]
+    if vorhanden and spalte not in vorhanden:
+        con.execute(f"ALTER TABLE {tabelle} ADD COLUMN {spalte} {typ}")
 
 
 def _ziel_modus_nachruesten(con: sqlite3.Connection) -> None:
@@ -392,21 +412,32 @@ def tag_aktivitaet(profil_id: int, datum: date) -> sqlite3.Row | None:
 
 
 def tag_aktivitaet_speichern(
-    profil_id: int, datum: date, min_sitzend: int, min_stehend: int, min_veranstaltung: int
+    profil_id: int,
+    datum: date,
+    min_schlaf: int,
+    min_sitzend: int,
+    min_stehend: int,
+    min_veranstaltung: int,
+    tagestyp: str | None,
 ) -> None:
-    minuten = (int(min_sitzend), int(min_stehend), int(min_veranstaltung))
+    minuten = (int(min_schlaf), int(min_sitzend), int(min_stehend), int(min_veranstaltung))
     if any(wert < 0 for wert in minuten):
         raise DatenFehler("Minuten können nicht negativ sein.")
-    if sum(minuten) > 24 * 60:
-        raise DatenFehler("Die Anteile ergeben zusammen mehr als 24 Stunden.")
+    if sum(minuten) > berechnung.MINUTEN_JE_TAG:
+        raise DatenFehler(
+            "Schlaf und Arbeit ergeben zusammen mehr als 24 Stunden."
+        )
+    if tagestyp is not None and tagestyp not in berechnung.TAGESTYPEN:
+        raise DatenFehler(f"Unbekannter Tagestyp: {tagestyp!r}")
 
     with verbindung() as con:
         con.execute(
-            "INSERT INTO tag_aktivitaet (profil_id, datum, min_sitzend, min_stehend, "
-            "min_veranstaltung) VALUES (?, ?, ?, ?, ?) "
-            "ON CONFLICT (profil_id, datum) DO UPDATE SET min_sitzend = excluded.min_sitzend, "
-            "min_stehend = excluded.min_stehend, min_veranstaltung = excluded.min_veranstaltung",
-            (profil_id, datum.isoformat(), *minuten),
+            "INSERT INTO tag_aktivitaet (profil_id, datum, min_schlaf, min_sitzend, "
+            "min_stehend, min_veranstaltung, tagestyp) VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (profil_id, datum) DO UPDATE SET min_schlaf = excluded.min_schlaf, "
+            "min_sitzend = excluded.min_sitzend, min_stehend = excluded.min_stehend, "
+            "min_veranstaltung = excluded.min_veranstaltung, tagestyp = excluded.tagestyp",
+            (profil_id, datum.isoformat(), *minuten, tagestyp),
         )
 
 
@@ -423,13 +454,47 @@ def tag_aktivitaet_loeschen(profil_id: int, datum: date) -> None:
         )
 
 
-def sportarten() -> list[sqlite3.Row]:
+def met_grundwerte() -> dict[str, sqlite3.Row]:
+    """MET-Grundwerte aus import_met_grundwerte.py, Schlüssel -> Zeile.
+
+    Einzige Quelle für die MET-Werte von Schlaf, Arbeit und Restzeit. Im Code
+    stehen keine.
+    """
+    with verbindung() as con:
+        try:
+            zeilen = con.execute(
+                "SELECT schluessel, name, met, code, quelle FROM met_grundwert"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return {}
+    return {zeile["schluessel"]: zeile for zeile in zeilen}
+
+
+def sportarten(kategorie: str | None = None) -> list[sqlite3.Row]:
     """Katalog aus import_sportarten.py. Leer, wenn der Import noch nicht lief."""
+    bedingung = "WHERE kategorie = ? " if kategorie else ""
+    werte = (kategorie,) if kategorie else ()
     with verbindung() as con:
         try:
             return con.execute(
-                "SELECT sportart_id, code, name, met_wert FROM sportart ORDER BY name"
+                "SELECT sportart_id, code, name, met_wert, kategorie FROM sportart "
+                f"{bedingung}ORDER BY met_wert, name",
+                werte,
             ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+
+
+def sportkategorien() -> list[str]:
+    with verbindung() as con:
+        try:
+            return [
+                zeile["kategorie"]
+                for zeile in con.execute(
+                    "SELECT DISTINCT kategorie FROM sportart "
+                    "WHERE kategorie IS NOT NULL ORDER BY kategorie"
+                )
+            ]
         except sqlite3.OperationalError:
             return []
 
@@ -476,7 +541,7 @@ def gewicht_bis(profil_id: int, datum: date) -> sqlite3.Row | None:
         ).fetchone()
 
 
-def tagesbedarf(profil_id: int, datum: date) -> sqlite3.Row | None:
+def tagesbedarf(profil_id: int, datum: date) -> dict:
     """Tagesbedarf eines Tages, immer frisch gerechnet und dann festgehalten.
 
     Der gespeicherte Wert kann so nicht veralten: jeder Lesezugriff rechnet aus
@@ -484,36 +549,66 @@ def tagesbedarf(profil_id: int, datum: date) -> sqlite3.Row | None:
     neuem berechnet_am zurück. Ändert sich später eines der drei, ist der Wert
     beim nächsten Lesen bereits angepasst.
 
-    Gibt None zurück, wenn kein Aktivitätseintrag vorliegt, das Profil kein
-    Erwachsenenprofil ist oder kein Gewicht bis zu diesem Datum bekannt ist. In
-    diesen Fällen wird eine früher gespeicherte Zeile entfernt.
+    Rückgabe ist immer ein dict mit:
+      status       ok | kein_profil | kind | keine_aktivitaet | kein_gewicht |
+                   met_fehlt | restzeit_negativ
+      zeile        die Zeile aus tagesbedarf, nur bei status ok
+      bloecke      die Blöcke des Tages, zusammen immer 1440 Minuten
+      restzeit_min berechnete Restzeit, negativ heißt: mehr als 24 Stunden erfasst
+      fehlende_met Schlüssel, die in met_grundwert fehlen
+
+    Außer bei status ok wird eine früher gespeicherte Zeile entfernt, damit kein
+    veralteter Wert stehen bleibt.
     """
     eintrag = profil(profil_id)
     aktivitaet = tag_aktivitaet(profil_id, datum)
     gewicht = gewicht_bis(profil_id, datum)
+    met_werte = met_grundwerte()
+    fehlende_met = [
+        schluessel
+        for schluessel in (*berechnung.ERFASSTE_BLOECKE.values(), berechnung.REST_SCHLUESSEL)
+        if schluessel not in met_werte
+    ]
 
-    if eintrag is None or eintrag["typ"] != "erwachsen" or aktivitaet is None or gewicht is None:
-        with verbindung() as con:
-            con.execute(
-                "DELETE FROM tagesbedarf WHERE profil_id = ? AND datum = ?",
-                (profil_id, datum.isoformat()),
-            )
-        return None
+    grund = None
+    if eintrag is None:
+        grund = "kein_profil"
+    elif eintrag["typ"] != "erwachsen":
+        grund = "kind"
+    elif aktivitaet is None:
+        grund = "keine_aktivitaet"
+    elif gewicht is None:
+        grund = "kein_gewicht"
+    elif fehlende_met:
+        grund = "met_fehlt"
+
+    if grund is not None:
+        return _bedarf_verwerfen(profil_id, datum, grund, fehlende_met=fehlende_met)
 
     gewicht_kg = gewicht["gewicht_kg"]
+    bloecke = berechnung.tagesbloecke(
+        minuten={feld: aktivitaet[feld] for feld in berechnung.ERFASSTE_BLOECKE},
+        sporteinheiten=[
+            (einheit["name"], einheit["met_wert"], einheit["dauer_min"])
+            for einheit in sporteinheiten(profil_id, datum)
+        ],
+        met_werte={schluessel: zeile["met"] for schluessel, zeile in met_werte.items()},
+        gewicht_kg=gewicht_kg,
+    )
+
+    restzeit = berechnung.restzeit_minuten(bloecke)
+    if restzeit < 0:
+        return _bedarf_verwerfen(profil_id, datum, "restzeit_negativ", bloecke=bloecke)
+
     grundumsatz = berechnung.grundumsatz_kcal(
         geschlecht=eintrag["geschlecht"],
         gewicht_kg=gewicht_kg,
         groesse_cm=eintrag["groesse_cm"],
         alter_jahre=berechnung.alter_in_jahren(date.fromisoformat(eintrag["geburtsdatum"]), datum),
     )
-    aktivitaet_anteil = berechnung.aktivitaet_kcal(
-        {feld: aktivitaet[feld] for feld in berechnung.HALTUNG_MET}, gewicht_kg
-    )
-    sport_anteil = sum(
-        berechnung.mehrverbrauch_kcal(einheit["met_wert"], gewicht_kg, einheit["dauer_min"])
-        for einheit in sporteinheiten(profil_id, datum)
-    )
+    # Alles außer Sport zählt als Aktivitätsanteil: Schlaf, Arbeit und Restzeit.
+    aktivitaet_anteil = berechnung.summe_kcal(bloecke, ("schlaf", "arbeit", "rest"))
+    sport_anteil = berechnung.summe_kcal(bloecke, ("sport",))
     bedarf = grundumsatz + aktivitaet_anteil + sport_anteil
 
     with verbindung() as con:
@@ -538,10 +633,40 @@ def tagesbedarf(profil_id: int, datum: date) -> sqlite3.Row | None:
                 datetime.now().isoformat(timespec="seconds"),
             ),
         )
-        return con.execute(
+        zeile = con.execute(
             "SELECT * FROM tagesbedarf WHERE profil_id = ? AND datum = ?",
             (profil_id, datum.isoformat()),
         ).fetchone()
+
+    return {
+        "status": "ok",
+        "zeile": zeile,
+        "bloecke": bloecke,
+        "restzeit_min": restzeit,
+        "fehlende_met": [],
+    }
+
+
+def _bedarf_verwerfen(
+    profil_id: int,
+    datum: date,
+    grund: str,
+    bloecke: list[dict] | None = None,
+    fehlende_met: list[str] | None = None,
+) -> dict:
+    """Entfernt einen früher gespeicherten Bedarf und meldet den Grund zurück."""
+    with verbindung() as con:
+        con.execute(
+            "DELETE FROM tagesbedarf WHERE profil_id = ? AND datum = ?",
+            (profil_id, datum.isoformat()),
+        )
+    return {
+        "status": grund,
+        "zeile": None,
+        "bloecke": bloecke or [],
+        "restzeit_min": berechnung.restzeit_minuten(bloecke) if bloecke else None,
+        "fehlende_met": fehlende_met or [],
+    }
 
 
 # --------------------------------------------------------------------------- #

@@ -136,12 +136,29 @@ lässt.
 |---|---|---|
 | profil_id | FK, Teil PK | |
 | datum | DATE, Teil PK | |
-| min_sitzend | INTEGER | MET 1,3 |
-| min_stehend | INTEGER | MET 1,8 |
-| min_veranstaltung | INTEGER | MET 4,0 |
+| min_schlaf | INTEGER | MET-Schlüssel `schlaf` |
+| min_sitzend | INTEGER | MET-Schlüssel `sitzend` |
+| min_stehend | INTEGER | MET-Schlüssel `stehend` |
+| min_veranstaltung | INTEGER | MET-Schlüssel `veranstaltung` |
+| tagestyp | TEXT NULL | homeoffice / buero / veranstaltung / frei, aus der Vorlage |
 
 Erfassung nach Haltung, nicht nach Arbeitsform. Die Anteile überschneiden sich nicht und
-ergeben zusammen die Arbeitszeit.
+ergeben zusammen die Arbeitszeit. Der Tagestyp belegt sie vor (Homeoffice 420/60/0,
+Büro 240/240/0, Veranstaltung 0/0/480, frei 0/0/0), bleibt aber einzeln änderbar; er wird
+mitgespeichert, damit erkennbar ist, ob die Werte aus der Vorlage stammen.
+
+### met_grundwert
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| schluessel | TEXT PK | schlaf / sitzend / stehend / veranstaltung / alltag |
+| name | TEXT | Anzeigename |
+| met | REAL | einzige Quelle für diese MET-Werte |
+| code | TEXT | Code der Quelle |
+| quelle | TEXT | |
+
+Befüllt aus `daten/met_grundwerte.csv` über `import_met_grundwerte.py`. **Im Code stehen
+keine MET-Werte.** Fehlt ein Schlüssel, wird kein Bedarf ausgegeben, sondern der Hinweis,
+den Import auszuführen.
 
 ### sportart
 | Spalte | Typ | Hinweis |
@@ -216,19 +233,37 @@ Grundumsatz nach Mifflin-St Jeor:
 - Männer: 10 × Gewicht(kg) + 6,25 × Groesse(cm) − 5 × Alter + 5
 - Frauen:  10 × Gewicht(kg) + 6,25 × Groesse(cm) − 5 × Alter − 161
 
-Aktivitäts- und Sportanteil je Tätigkeit:
+Der Tag wird **vollständig** aufgeteilt. 1440 Minuten bestehen aus vier Blöcken:
+
+1. Schlaf
+2. Arbeit, aufgeteilt nach Haltung (sitzend, stehend, Veranstaltung)
+3. Sport, je Sporteinheit
+4. Restzeit als Rechenwert: `1440 − Schlaf − Arbeit − Sport`, MET-Schlüssel `alltag`
+
+Die Restzeit wird nicht erfasst. Ohne sie würde die übrige Zeit mit dem Ruheumsatz
+eingehen, als wäre man regungslos, und der Bedarf würde mit längerer Arbeitszeit steigen,
+selbst bei sitzender Tätigkeit. Ergibt die Restzeit einen negativen Wert, wird **kein**
+Bedarf ausgegeben, sondern der Hinweis, dass die erfassten Zeiten zusammen mehr als
+24 Stunden ergeben.
+
+Mehrverbrauch je Block:
 
     (MET − 1) × Gewicht(kg) × Stunden
 
 Der Abzug von 1 MET ist zwingend, weil der Ruheumsatz bereits im Grundumsatz enthalten
-ist. Ohne ihn wird die Ruhezeit während Arbeit und Sport doppelt gezählt.
+ist. Ohne ihn wird die Zeit doppelt gezählt.
+
+`aktivitaet_kcal` fasst Schlaf, Arbeit und Restzeit zusammen, `sport_kcal` die
+Sporteinheiten.
 
     bedarf_kcal = grundumsatz + aktivitaet_kcal + sport_kcal
 
 KEIN PAL-Faktor. Er bildet einen Wochendurchschnitt ab und würde den Zweck der App
 zunichtemachen, nämlich dass sich Bürotag und Trainingstag unterscheiden.
 
-Kalorienziel: aenderung_kg_woche × 7000 / 7 als tägliche Differenz zum Bedarf.
+Kalorienziel: aenderung_kg_woche × 7000 / 7 als tägliche Differenz zum Bedarf. Liegt es
+unter dem Grundumsatz, wird der Wert unverändert angezeigt und sichtbar gekennzeichnet.
+Nicht begrenzen, nicht verändern.
 
 Liegt für einen Tag kein Eintrag in `tag_aktivitaet` vor, wird KEIN Tagesbedarf
 ausgegeben. Nicht ersatzweise nur den Grundumsatz anzeigen.

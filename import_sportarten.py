@@ -1,7 +1,7 @@
 """Import des Sportartenkatalogs in tracker.db.
 
 Nicht Teil der Anwendung. Liest daten/sportarten.csv mit den Spalten
-code, name, met, quelle und füllt die Tabelle sportart.
+code, name, met, quelle und kategorie und füllt die Tabelle sportart.
 
 Der Code wird als Text gespeichert, damit führende Nullen erhalten bleiben.
 Die MET-Werte werden unverändert aus der Datei übernommen. Ein zweiter Lauf
@@ -21,7 +21,7 @@ BASIS = Path(__file__).resolve().parent
 QUELLE = BASIS / "daten" / "sportarten.csv"
 DATENBANK = BASIS / "tracker.db"
 
-ERWARTETE_SPALTEN = ("code", "name", "met", "quelle")
+ERWARTETE_SPALTEN = ("code", "name", "met", "quelle", "kategorie")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sportart (
@@ -29,9 +29,17 @@ CREATE TABLE IF NOT EXISTS sportart (
     code        TEXT NOT NULL UNIQUE,
     name        TEXT NOT NULL,
     met_wert    REAL NOT NULL,
-    quelle      TEXT
+    quelle      TEXT,
+    kategorie   TEXT
 );
 """
+
+
+def spalte_ergaenzen(verbindung, tabelle, spalte, typ):
+    """Ergaenzt eine Spalte in einer aelteren Datenbank."""
+    vorhanden = [zeile["name"] for zeile in verbindung.execute(f"PRAGMA table_info({tabelle})")]
+    if spalte not in vorhanden:
+        verbindung.execute(f"ALTER TABLE {tabelle} ADD COLUMN {spalte} {typ}")
 
 
 def pruefe_kopfzeile(spalten):
@@ -73,6 +81,7 @@ def importiere(quelle: Path, datenbank: Path) -> None:
     verbindung = sqlite3.connect(datenbank)
     verbindung.row_factory = sqlite3.Row
     verbindung.executescript(SCHEMA)
+    spalte_ergaenzen(verbindung, "sportart", "kategorie", "TEXT")
 
     gelesen = neu = aktualisiert = 0
     uebersprungen = []
@@ -89,8 +98,9 @@ def importiere(quelle: Path, datenbank: Path) -> None:
             name = (zeile.get("name") or "").strip()
             met = lies_met(zeile.get("met"))
             quellencode = (zeile.get("quelle") or "").strip() or None
+            kategorie = (zeile.get("kategorie") or "").strip().lower() or None
 
-            if not code or not name or met is None:
+            if not code or not name or met is None or kategorie is None:
                 uebersprungen.append(
                     f"Zeile {zeilennummer}: code={code!r} name={name!r} met={zeile.get('met')!r}"
                 )
@@ -101,21 +111,26 @@ def importiere(quelle: Path, datenbank: Path) -> None:
             ).fetchone()
             if vorhanden:
                 verbindung.execute(
-                    "UPDATE sportart SET name = ?, met_wert = ?, quelle = ? WHERE code = ?",
-                    (name, met, quellencode, code),
+                    "UPDATE sportart SET name = ?, met_wert = ?, quelle = ?, kategorie = ? "
+                    "WHERE code = ?",
+                    (name, met, quellencode, kategorie, code),
                 )
                 aktualisiert += 1
             else:
                 verbindung.execute(
-                    "INSERT INTO sportart (code, name, met_wert, quelle) VALUES (?, ?, ?, ?)",
-                    (code, name, met, quellencode),
+                    "INSERT INTO sportart (code, name, met_wert, quelle, kategorie) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (code, name, met, quellencode, kategorie),
                 )
                 neu += 1
 
     verbindung.commit()
     gesamt = verbindung.execute("SELECT COUNT(*) FROM sportart").fetchone()[0]
     beispiele = verbindung.execute(
-        "SELECT code, name, met_wert, quelle FROM sportart ORDER BY code LIMIT 3"
+        "SELECT code, name, met_wert, quelle, kategorie FROM sportart ORDER BY code LIMIT 3"
+    ).fetchall()
+    je_kategorie = verbindung.execute(
+        "SELECT kategorie, COUNT(*) AS anzahl FROM sportart GROUP BY kategorie ORDER BY kategorie"
     ).fetchall()
     verbindung.close()
 
@@ -128,11 +143,16 @@ def importiere(quelle: Path, datenbank: Path) -> None:
     for hinweis in uebersprungen:
         print(f"    - {hinweis}")
     print(f"  Sportarten insgesamt:  {gesamt}")
+    for zeile in je_kategorie:
+        print(f"    {zeile['kategorie'] or '(ohne)':<12} {zeile['anzahl']}")
 
     print()
     print("  Erste Eintraege (Code als Text, fuehrende Nullen bleiben):")
     for zeile in beispiele:
-        print(f"    {zeile['code']!r:<10} {zeile['name']:<38} MET {zeile['met_wert']:<6} {zeile['quelle']}")
+        print(
+            f"    {zeile['code']!r:<10} {zeile['name']:<38} MET {zeile['met_wert']:<6} "
+            f"{zeile['kategorie']:<12} {zeile['quelle']}"
+        )
 
 
 def main():
