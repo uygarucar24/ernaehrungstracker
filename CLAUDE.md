@@ -286,6 +286,16 @@ oder einen Durchschnittswert rechnen.
 Positionen ohne Kalorienwert werden gezählt und die Zahl genannt, damit erkennbar ist,
 dass die Aufnahme unvollständig erfasst ist.
 
+Ist für den Tag **keine Position** erfasst oder hat keine der Positionen einen
+Kalorienwert, ist die Aufnahme unbekannt: keine Aufnahme, keine Differenz. Bedarf und
+Kalorienziel werden gezeigt, dazu der Grund. Nicht mit einer Aufnahme von 0 kcal rechnen —
+unbekannt ist nicht null, dieselbe Regel wie beim fehlenden Aktivitätseintrag. Auch bei
+den Makronährstoffen steht dann `unbekannt` statt 0.
+
+Auf der Gewichtsseite wird das Eingabefeld mit dem Wert des **gewählten** Datums
+vorbelegt, sonst mit dem letzten Wert davor. Ein späterer Eintrag darf beim Nachtragen
+nicht vorgeschlagen werden. Gibt es keinen Wert bis zu diesem Tag, bleibt das Feld leer.
+
 **Kinderprofil:** Bedarf, Kalorienziel und Differenz entfallen vollständig und werden
 nicht aufgebaut. Sichtbar sind Mahlzeiten, Tagessumme und Makronährstoffe.
 

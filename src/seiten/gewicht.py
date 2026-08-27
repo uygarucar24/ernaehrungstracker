@@ -40,22 +40,25 @@ def _erfassung(profil_id: int) -> None:
         "Datum", value=date.today(), max_value=date.today(), format="DD.MM.YYYY", key="gw_datum"
     )
     vorhanden = datenbank.gewicht_am(profil_id, datum)
-    letztes = datenbank.letztes_gewicht(profil_id)
-    startwert = (
-        float(vorhanden["gewicht_kg"])
-        if vorhanden
-        else float(letztes["gewicht_kg"]) if letztes else 75.0
-    )
+    # Vorbelegt wird der Wert des gewählten Datums, sonst der letzte Wert davor.
+    # Ein späterer Eintrag darf nicht als historischer Messwert vorgeschlagen
+    # werden. Gibt es keinen Wert bis zu diesem Tag, bleibt das Feld leer.
+    bis_datum = datenbank.gewicht_bis(profil_id, datum)
+    startwert = float(bis_datum["gewicht_kg"]) if bis_datum else None
     gewicht_kg = spalte2.number_input(
         "Gewicht in kg",
         min_value=1.0,
         max_value=400.0,
         value=startwert,
         step=0.1,
+        placeholder="noch kein Wert",
         key=f"gw_wert_{datum.isoformat()}",
     )
     spalte3.write("")
     if spalte3.button("Speichern", type="primary", width="stretch"):
+        if gewicht_kg is None:
+            st.error("Bitte ein Gewicht eingeben.")
+            return
         try:
             datenbank.gewicht_speichern(profil_id, datum, float(gewicht_kg))
         except datenbank.DatenFehler as fehler:

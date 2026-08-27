@@ -21,6 +21,11 @@ def _kcal(wert: float) -> str:
     return f"{wert:.0f} kcal"
 
 
+def _energie(summe: float, abdeckung: int) -> str:
+    """Ohne einen einzigen bekannten Wert ist die Summe unbekannt, nicht 0."""
+    return _kcal(summe) if abdeckung else "unbekannt"
+
+
 # --------------------------------------------------------------------------- #
 # Aufnahme aus den Mahlzeiten
 # --------------------------------------------------------------------------- #
@@ -64,6 +69,9 @@ def _aufnahme(profil_id: int, datum: date) -> dict:
         "summen": summen,
         "abdeckung": abdeckung,
         "ohne_energie": len(positionen) - abdeckung[ENERGIE],
+        # Ohne erfasste Position oder ohne einen einzigen Kalorienwert ist die
+        # Aufnahme unbekannt. Unbekannt ist nicht null.
+        "bekannt": abdeckung[ENERGIE] > 0,
     }
 
 
@@ -119,20 +127,48 @@ def _bilanz(profil_id: int, datum: date, aufnahme: dict) -> None:
     # Ohne Rate ist das Ziel der Bedarf; bei "halten" sind beide identisch.
     ziel = berechnung.kalorienziel_kcal(bedarf, rate) if rate else bedarf
 
+    st.caption("Bilanz gegen das Kalorienziel")
+
+    def _ziel_kennzahl(behaelter) -> None:
+        if rate:
+            behaelter.metric(
+                "Kalorienziel",
+                _kcal(ziel),
+                delta=f"{rate * berechnung.KCAL_JE_KG / 7:+.0f} kcal gegenüber dem Bedarf",
+                delta_color="off",
+            )
+        else:
+            behaelter.metric(
+                "Kalorienziel", _kcal(ziel), help="Ohne Änderungsrate gleich dem Bedarf."
+            )
+
+    # Unbekannte Aufnahme wird nicht wie eine Aufnahme von null behandelt:
+    # ohne bekannten Kalorienwert gibt es keine Aufnahme und keine Differenz.
+    if not aufnahme["bekannt"]:
+        _ziel_kennzahl(st)
+        if not aufnahme["positionen"]:
+            st.info(
+                "Für diesen Tag ist keine Mahlzeit erfasst. Ohne erfasste Position gibt es "
+                "keine Aufnahme und damit keine Bilanz. Es wird nicht mit einer Aufnahme "
+                "von 0 kcal gerechnet."
+            )
+        elif len(aufnahme["positionen"]) == 1:
+            st.info(
+                "Die einzige erfasste Position hat keinen Kalorienwert. Damit ist die "
+                "Aufnahme unbekannt und es gibt keine Bilanz."
+            )
+        else:
+            st.info(
+                f"Keine der {len(aufnahme['positionen'])} erfassten Positionen hat einen "
+                "Kalorienwert. Damit ist die Aufnahme unbekannt und es gibt keine Bilanz."
+            )
+        return
+
     aufgenommen = aufnahme["summen"][ENERGIE]
     differenz = ziel - aufgenommen
 
-    st.caption("Bilanz gegen das Kalorienziel")
     spalten = st.columns(3)
-    if rate:
-        spalten[0].metric(
-            "Kalorienziel",
-            _kcal(ziel),
-            delta=f"{rate * berechnung.KCAL_JE_KG / 7:+.0f} kcal gegenüber dem Bedarf",
-            delta_color="off",
-        )
-    else:
-        spalten[0].metric("Kalorienziel", _kcal(ziel), help="Ohne Änderungsrate gleich dem Bedarf.")
+    _ziel_kennzahl(spalten[0])
     spalten[1].metric("Aufnahme", _kcal(aufgenommen))
     spalten[2].metric("Differenz", f"{differenz:+.0f} kcal")
 
@@ -177,14 +213,14 @@ def _mahlzeiten(aufnahme: dict) -> None:
         zeile = st.columns([2.2, 1.4, 1.4, 2.0])
         zeile[0].write(ABSCHNITT_ANZEIGE[mahlzeit["abschnitt"]])
         zeile[1].write(f"{anzahl}")
-        zeile[2].write(_kcal(mahlzeit["summen"][ENERGIE]))
+        zeile[2].write(_energie(mahlzeit["summen"][ENERGIE], mahlzeit["abdeckung"][ENERGIE]))
         zeile[3].write("—" if ohne == 0 else f"{ohne}")
 
     gesamt = len(aufnahme["positionen"])
     summe = st.columns([2.2, 1.4, 1.4, 2.0])
     summe[0].write("**Tagessumme**")
     summe[1].write(f"**{gesamt}**")
-    summe[2].write(f"**{_kcal(aufnahme['summen'][ENERGIE])}**")
+    summe[2].write(f"**{_energie(aufnahme['summen'][ENERGIE], aufnahme['abdeckung'][ENERGIE])}**")
     summe[3].write("—" if aufnahme["ohne_energie"] == 0 else f"**{aufnahme['ohne_energie']}**")
 
     if aufnahme["ohne_energie"]:
@@ -210,7 +246,11 @@ def _makros(aufnahme: dict) -> None:
     spalten = st.columns(len(MAKROS))
     for spalte, code in zip(spalten, MAKROS):
         einheit = stammdaten[code]["einheit"]
-        spalte.metric(anzeige[code], f"{aufnahme['summen'][code]:.1f} {einheit}")
+        # Wie in der Mahlzeitenansicht: ohne einen bekannten Wert unbekannt, keine 0.
+        if aufnahme["abdeckung"][code] == 0:
+            spalte.metric(anzeige[code], "unbekannt")
+        else:
+            spalte.metric(anzeige[code], f"{aufnahme['summen'][code]:.1f} {einheit}")
         spalte.caption(f"aus {aufnahme['abdeckung'][code]} von {gesamt}")
 
 
