@@ -83,9 +83,15 @@ def tagesbloecke(
     Die Restzeit wird nicht erfasst, sondern als 1440 minus Schlaf minus Arbeit
     minus Sport berechnet. Sie kann negativ werden; dann ergeben die erfassten
     Zeiten zusammen mehr als 24 Stunden und der Aufrufer gibt keinen Bedarf aus.
+
+    Es entstehen nur Blöcke für Felder, die in minuten stehen. Kinderprofile
+    übergeben deshalb ausschließlich min_schlaf, und die Arbeitsblöcke entfallen
+    ganz, statt mit 0 Minuten mitzulaufen.
     """
     bloecke = []
     for feld, schluessel in ERFASSTE_BLOECKE.items():
+        if feld not in minuten:
+            continue
         dauer = int(minuten.get(feld) or 0)
         met = met_werte[schluessel]
         bloecke.append(

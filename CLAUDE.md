@@ -22,6 +22,7 @@ Kein Cloud-Dienst, keine Nutzerkonten. Die App läuft ausschließlich lokal.
    gerechnet wird, hängt an einer ausdrücklichen Prüfung von `typ`.
 8. **CSV-Export als UTF-8 mit BOM**, sonst zerlegt Excel die Umlaute.
 9. **Keine medizinischen Aussagen.** Kein "Mangel", keine Ursachen für Beschwerden.
+10. Bei jeder neuen Funktion ist ausdrücklich festzulegen, was im Kinderprofil davon sichtbar und erfassbar ist. Nicht sichtbare Elemente werden nicht aufgebaut, nicht ausgegraut.
 
 ## Datenmodell
 
@@ -146,6 +147,12 @@ Erfassung nach Haltung, nicht nach Arbeitsform. Die Anteile überschneiden sich 
 ergeben zusammen die Arbeitszeit. Der Tagestyp belegt sie vor (Homeoffice 420/60/0,
 Büro 240/240/0, Veranstaltung 0/0/480, frei 0/0/0), bleibt aber einzeln änderbar; er wird
 mitgespeichert, damit erkennbar ist, ob die Werte aus der Vorlage stammen.
+
+**Kinderprofil:** keine Arbeitszeit. Tagestyp und die drei Haltungsfelder werden auf der
+Aktivitätsseite nicht aufgebaut, die drei Spalten bleiben auf 0 und `tagestyp` leer.
+Erfassbar sind Schlaf und Sporteinheiten. Die Aufteilung des Tages zeigt nur Schlaf,
+Sport und Restzeit (1440 minus Schlaf minus Sport) und keine Energieangaben, weil für
+Kinderprofile kein Tagesbedarf berechnet wird.
 
 ### met_grundwert
 | Spalte | Typ | Hinweis |

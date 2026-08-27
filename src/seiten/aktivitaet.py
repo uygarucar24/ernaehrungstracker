@@ -36,7 +36,41 @@ def _dauer(minuten: int) -> str:
 # --------------------------------------------------------------------------- #
 # Schlaf, Tagestyp und Arbeitszeiten
 # --------------------------------------------------------------------------- #
-def _tagesstruktur(profil_id: int, datum: date, met_werte: dict) -> None:
+def _speicherknoepfe(
+    profil_id: int,
+    datum: date,
+    vorhanden,
+    schlaf: int,
+    arbeit: dict[str, int],
+    tagestyp: str | None,
+) -> None:
+    """Speichern und Löschen, für beide Profiltypen gleich."""
+    knopf1, knopf2 = st.columns(2)
+    if knopf1.button("Tag speichern", type="primary"):
+        try:
+            datenbank.tag_aktivitaet_speichern(
+                profil_id,
+                datum,
+                min_schlaf=schlaf,
+                min_sitzend=arbeit["min_sitzend"],
+                min_stehend=arbeit["min_stehend"],
+                min_veranstaltung=arbeit["min_veranstaltung"],
+                tagestyp=tagestyp,
+            )
+        except datenbank.DatenFehler as fehler:
+            st.error(str(fehler))
+            return
+        st.rerun()
+
+    if vorhanden is not None and knopf2.button("Eintrag löschen"):
+        datenbank.tag_aktivitaet_loeschen(profil_id, datum)
+        st.rerun()
+
+    if vorhanden is None:
+        st.info("Für diesen Tag ist noch nichts gespeichert.")
+
+
+def _tagesstruktur(profil_id: int, datum: date, met_werte: dict, ist_kind: bool) -> None:
     st.subheader("Tagesstruktur")
 
     vorhanden = datenbank.tag_aktivitaet(profil_id, datum)
@@ -66,6 +100,19 @@ def _tagesstruktur(profil_id: int, datum: date, met_werte: dict) -> None:
     )
     schlaf = int(schlaf_stunden) * 60 + int(schlaf_minuten)
     schlaf3.caption(f"Gespeichert werden {schlaf} Minuten ({_dauer(schlaf)}).")
+
+    # Der Profiltyp steuert: Kinderprofile erfassen keine Arbeitszeit. Tagestyp
+    # und die drei Haltungsfelder werden gar nicht erst aufgebaut.
+    if ist_kind:
+        _speicherknoepfe(
+            profil_id,
+            datum,
+            vorhanden,
+            schlaf=schlaf,
+            arbeit={"min_sitzend": 0, "min_stehend": 0, "min_veranstaltung": 0},
+            tagestyp=None,
+        )
+        return
 
     typen = list(berechnung.TAGESTYPEN)
     gespeicherter_typ = vorhanden["tagestyp"] if vorhanden else None
@@ -119,30 +166,9 @@ def _tagesstruktur(profil_id: int, datum: date, met_werte: dict) -> None:
         + f"{sum(arbeit.values())} Minuten ({_dauer(sum(arbeit.values()))})."
     )
 
-    knopf1, knopf2 = st.columns(2)
-    if knopf1.button("Tag speichern", type="primary"):
-        try:
-            datenbank.tag_aktivitaet_speichern(
-                profil_id,
-                datum,
-                min_schlaf=schlaf,
-                min_sitzend=arbeit["min_sitzend"],
-                min_stehend=arbeit["min_stehend"],
-                min_veranstaltung=arbeit["min_veranstaltung"],
-                tagestyp=tagestyp,
-            )
-        except datenbank.DatenFehler as fehler:
-            st.error(str(fehler))
-            return
-        st.rerun()
+    _speicherknoepfe(profil_id, datum, vorhanden, schlaf=schlaf, arbeit=arbeit, tagestyp=tagestyp)
 
-    if vorhanden and knopf2.button("Eintrag löschen"):
-        datenbank.tag_aktivitaet_loeschen(profil_id, datum)
-        st.rerun()
-
-    if vorhanden is None:
-        st.info("Für diesen Tag ist noch nichts gespeichert.")
-    elif gespeicherter_typ and (
+    if vorhanden is not None and gespeicherter_typ and (
         any(int(vorhanden[feld]) != berechnung.TAGESTYPEN[gespeicherter_typ][feld] for feld in felder)
     ):
         st.caption(
@@ -214,10 +240,17 @@ def _sport(profil_id: int, datum: date) -> None:
 # --------------------------------------------------------------------------- #
 # Tagesbedarf
 # --------------------------------------------------------------------------- #
-def _aufschluesselung(bloecke: list[dict], met_werte: dict) -> None:
-    """Zeigt alle Blöcke mit Minuten und kcal. Die Summe ist immer 1440 Minuten."""
-    kopf = st.columns([2.6, 1.0, 1.4, 1.2])
-    for spalte, text in zip(kopf, ("Block", "MET", "Dauer", "kcal")):
+def _aufschluesselung(bloecke: list[dict], met_werte: dict, mit_kcal: bool = True) -> None:
+    """Zeigt alle Blöcke mit Minuten. Die Summe ist immer 1440 Minuten.
+
+    Ohne mit_kcal entfällt die Energiespalte; Kinderprofile bekommen keine
+    Energieangaben, weil für sie auch kein Tagesbedarf gerechnet wird.
+    """
+    breiten = [2.6, 1.0, 1.4, 1.2] if mit_kcal else [3.2, 1.2, 1.8]
+    ueberschriften = ("Block", "MET", "Dauer", "kcal") if mit_kcal else ("Block", "MET", "Dauer")
+
+    kopf = st.columns(breiten)
+    for spalte, text in zip(kopf, ueberschriften):
         spalte.caption(text)
 
     for block in bloecke:
@@ -226,17 +259,55 @@ def _aufschluesselung(bloecke: list[dict], met_werte: dict) -> None:
             if block["schluessel"] in met_werte
             else block["schluessel"]
         )
-        zeile = st.columns([2.6, 1.0, 1.4, 1.2])
+        zeile = st.columns(breiten)
         zeile[0].write(name if block["art"] != "sport" else f"Sport: {name}")
         zeile[1].write(f"{block['met']:g}")
         zeile[2].write(f"{block['minuten']} min ({_dauer(block['minuten'])})")
-        zeile[3].write(f"{block['kcal']:.1f}")
+        if mit_kcal:
+            zeile[3].write(f"{block['kcal']:.1f}")
 
-    summe = st.columns([2.6, 1.0, 1.4, 1.2])
+    summe = st.columns(breiten)
     summe[0].write("**Summe**")
     summe[1].write("")
     summe[2].write(f"**{sum(block['minuten'] for block in bloecke)} min**")
-    summe[3].write(f"**{sum(block['kcal'] for block in bloecke):.1f}**")
+    if mit_kcal:
+        summe[3].write(f"**{sum(block['kcal'] for block in bloecke):.1f}**")
+
+
+def _tagesuebersicht_kind(profil_id: int, datum: date, met_werte: dict) -> None:
+    """Aufteilung des Tages im Kinderprofil: Schlaf, Sport, Restzeit.
+
+    Ohne Arbeitsblöcke, weil im Kinderprofil keine Arbeitszeit erfasst wird, und
+    ohne Energieangaben, weil für Kinderprofile kein Tagesbedarf gerechnet wird.
+    """
+    st.subheader("Aufteilung des Tages")
+
+    aktivitaet = datenbank.tag_aktivitaet(profil_id, datum)
+    if aktivitaet is None:
+        st.info("Sobald der Schlaf gespeichert ist, steht hier die Aufteilung des Tages.")
+        return
+
+    bloecke = berechnung.tagesbloecke(
+        minuten={"min_schlaf": aktivitaet["min_schlaf"]},
+        sporteinheiten=[
+            (einheit["name"], einheit["met_wert"], einheit["dauer_min"])
+            for einheit in datenbank.sporteinheiten(profil_id, datum)
+        ],
+        met_werte={schluessel: zeile["met"] for schluessel, zeile in met_werte.items()},
+        gewicht_kg=0.0,  # Energie wird hier nicht ausgewiesen.
+    )
+
+    restzeit = berechnung.restzeit_minuten(bloecke)
+    if restzeit < 0:
+        st.error(
+            "Die erfassten Zeiten ergeben zusammen mehr als 24 Stunden "
+            f"({_dauer(-restzeit)} zu viel)."
+        )
+    _aufschluesselung(bloecke, met_werte, mit_kcal=False)
+    st.caption(
+        f"Restzeit ist berechnet: {berechnung.MINUTEN_JE_TAG} minus Schlaf und Sport. "
+        "Für Kinderprofile wird kein Tagesbedarf berechnet."
+    )
 
 
 def _bedarf(profil_id: int, datum: date, met_werte: dict) -> None:
@@ -246,6 +317,7 @@ def _bedarf(profil_id: int, datum: date, met_werte: dict) -> None:
     status = ergebnis["status"]
 
     if status == "kind":
+        # Kinderprofile landen hier nicht, seite() ruft _tagesuebersicht_kind auf.
         st.info("Für Kinderprofile wird kein Tagesbedarf berechnet.")
         return
     if status == "met_fehlt":
@@ -339,8 +411,16 @@ def seite() -> None:
 
     datum = st.date_input("Datum", value=date.today(), format="DD.MM.YYYY", key="ak_datum")
 
-    _tagesstruktur(profil_id, datum, met_werte)
+    # Ausdrückliche Prüfung des Profiltyps: im Kinderprofil gibt es keine
+    # Arbeitszeit und keinen Tagesbedarf, die Elemente werden nicht aufgebaut.
+    eintrag = datenbank.profil(profil_id)
+    ist_kind = eintrag is not None and eintrag["typ"] == "kind"
+
+    _tagesstruktur(profil_id, datum, met_werte, ist_kind)
     st.divider()
     _sport(profil_id, datum)
     st.divider()
-    _bedarf(profil_id, datum, met_werte)
+    if ist_kind:
+        _tagesuebersicht_kind(profil_id, datum, met_werte)
+    else:
+        _bedarf(profil_id, datum, met_werte)
