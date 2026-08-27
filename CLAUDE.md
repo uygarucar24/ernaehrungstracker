@@ -272,6 +272,23 @@ Kalorienziel: aenderung_kg_woche × 7000 / 7 als tägliche Differenz zum Bedarf.
 unter dem Grundumsatz, wird der Wert unverändert angezeigt und sichtbar gekennzeichnet.
 Nicht begrenzen, nicht verändern.
 
+## Tagesübersicht
+
+Bedarf und Aufnahme werden auf einer eigenen Seite zusammengeführt. Maßgeblich für die
+Differenz ist das **Kalorienziel**, nicht der Bedarf; ohne Änderungsrate sind beide
+gleich. Die Differenz wird mit Vorzeichen und in Worten ausgewiesen, als verfügbare Menge
+oder als Überschreitung.
+
+Fehlt der Eintrag in `tag_aktivitaet`, gibt es keinen Bedarf und keine Differenz. Dann
+wird die Aufnahme gezeigt und der Grund genannt. Nicht ersatzweise gegen den Grundumsatz
+oder einen Durchschnittswert rechnen.
+
+Positionen ohne Kalorienwert werden gezählt und die Zahl genannt, damit erkennbar ist,
+dass die Aufnahme unvollständig erfasst ist.
+
+**Kinderprofil:** Bedarf, Kalorienziel und Differenz entfallen vollständig und werden
+nicht aufgebaut. Sichtbar sind Mahlzeiten, Tagessumme und Makronährstoffe.
+
 Liegt für einen Tag kein Eintrag in `tag_aktivitaet` vor, wird KEIN Tagesbedarf
 ausgegeben. Nicht ersatzweise nur den Grundumsatz anzeigen.
 

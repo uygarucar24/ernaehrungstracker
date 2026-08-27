@@ -142,3 +142,30 @@ def summe_kcal(bloecke: list[dict], arten: tuple[str, ...]) -> float:
 def kalorienziel_kcal(bedarf_kcal: float, aenderung_kg_woche: float) -> float:
     """Bedarf plus die tägliche Differenz aus der gewünschten Wochenänderung."""
     return bedarf_kcal + aenderung_kg_woche * KCAL_JE_KG / 7
+
+
+def naehrwertsummen(
+    positionen: list[tuple[int, float]],
+    werte: dict[tuple[int, str], float],
+    codes: tuple[str, ...],
+    bezugsmenge_g: float,
+) -> tuple[dict[str, float], dict[str, int]]:
+    """Summiert Nährwerte über Positionen und zählt mit, worauf die Summe beruht.
+
+    positionen: (lebensmittel_id, menge_g). werte: (lebensmittel_id, code) -> Wert
+    je Bezugsmenge; fehlt der Schlüssel, ist der Wert unbekannt und geht nicht
+    als 0 in die Summe ein.
+
+    Gibt (Summen, Abdeckung) zurück, Abdeckung als Anzahl der Positionen mit
+    bekanntem Wert je Nährstoff.
+    """
+    summen = {code: 0.0 for code in codes}
+    abdeckung = {code: 0 for code in codes}
+    for lebensmittel_id, menge_g in positionen:
+        for code in codes:
+            wert = werte.get((lebensmittel_id, code))
+            if wert is None:
+                continue
+            summen[code] += wert * menge_g / bezugsmenge_g
+            abdeckung[code] += 1
+    return summen, abdeckung

@@ -342,6 +342,19 @@ def mahlzeit_positionen(profil_id: int, datum: date, tagesabschnitt: str) -> lis
         ).fetchall()
 
 
+def mahlzeiten_am_tag(profil_id: int, datum: date) -> list[sqlite3.Row]:
+    """Alle Positionen aller Mahlzeiten eines Tages, mit Tagesabschnitt."""
+    with verbindung() as con:
+        return con.execute(
+            "SELECT m.tagesabschnitt, p.position_id, p.lebensmittel_id, p.menge_g, "
+            "l.bezeichnung FROM mahlzeit m "
+            "JOIN mahlzeit_position p ON p.mahlzeit_id = m.mahlzeit_id "
+            "JOIN lebensmittel l ON l.lebensmittel_id = p.lebensmittel_id "
+            "WHERE m.profil_id = ? AND m.datum = ? ORDER BY p.position_id",
+            (profil_id, datum.isoformat()),
+        ).fetchall()
+
+
 def position_hinzufuegen(
     profil_id: int,
     datum: date,
