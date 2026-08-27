@@ -43,15 +43,29 @@ def _tagesstruktur(profil_id: int, datum: date, met_werte: dict) -> None:
     tag = datum.isoformat()  # Teil der Widget-Schlüssel: bei Datumswechsel
     # werden die Felder mit den gespeicherten Werten neu aufgebaut.
 
-    schlaf = st.number_input(
-        "Schlaf (Minuten)",
+    # Schlaf in Stunden und Minuten, gespeichert wird die Summe in Minuten.
+    schlaf_start = int(vorhanden["min_schlaf"]) if vorhanden else 480
+    schlaf_stunden_start, schlaf_minuten_start = divmod(schlaf_start, 60)
+    schlaf1, schlaf2, schlaf3 = st.columns([1, 1, 2])
+    schlaf_stunden = schlaf1.number_input(
+        "Schlaf (Stunden)",
         min_value=0,
-        max_value=berechnung.MINUTEN_JE_TAG,
-        value=int(vorhanden["min_schlaf"]) if vorhanden else 480,
-        step=15,
-        key=f"ak_min_schlaf_{tag}",
+        max_value=24,
+        value=schlaf_stunden_start,
+        step=1,
+        key=f"ak_schlaf_h_{tag}",
         help=f"MET {met_werte['schlaf']['met']:g} aus met_grundwert.",
     )
+    schlaf_minuten = schlaf2.number_input(
+        "Schlaf (Minuten)",
+        min_value=0,
+        max_value=59,
+        value=schlaf_minuten_start,
+        step=5,
+        key=f"ak_schlaf_min_{tag}",
+    )
+    schlaf = int(schlaf_stunden) * 60 + int(schlaf_minuten)
+    schlaf3.caption(f"Gespeichert werden {schlaf} Minuten ({_dauer(schlaf)}).")
 
     typen = list(berechnung.TAGESTYPEN)
     gespeicherter_typ = vorhanden["tagestyp"] if vorhanden else None
@@ -68,13 +82,14 @@ def _tagesstruktur(profil_id: int, datum: date, met_werte: dict) -> None:
     st.caption(
         "Die Vorlage belegt die Arbeitszeiten vor: "
         + ", ".join(
-            f"{met_werte[schluessel]['name']} {vorlage[feld]} min"
+            f"{met_werte[schluessel]['name']} {vorlage[feld] / 60:g} h"
             for feld, schluessel in berechnung.ERFASSTE_BLOECKE.items()
             if feld != "min_schlaf"
         )
         + ". Einzeln änderbar."
     )
 
+    # Arbeitszeiten in Stunden, auch mit Nachkommastellen (7,5 h = 450 min).
     # Der Vorlagenwert gilt, solange der Tagestyp gewechselt wird; danach zählt,
     # was in den Feldern steht. Deshalb steckt der Tagestyp im Widget-Schlüssel.
     arbeit = {}
@@ -86,15 +101,23 @@ def _tagesstruktur(profil_id: int, datum: date, met_werte: dict) -> None:
             startwert = int(vorhanden[feld])
         else:
             startwert = vorlage[feld]
-        arbeit[feld] = spalte.number_input(
-            f"{met_werte[schluessel]['name']} (Minuten)",
-            min_value=0,
-            max_value=berechnung.MINUTEN_JE_TAG,
-            value=startwert,
-            step=15,
-            key=f"ak_{feld}_{tag}_{tagestyp}",
-            help=f"MET {met_werte[schluessel]['met']:g}",
+        stunden = spalte.number_input(
+            f"{met_werte[schluessel]['name']} (Stunden)",
+            min_value=0.0,
+            max_value=24.0,
+            value=startwert / 60,
+            step=0.25,
+            format="%.2f",
+            key=f"ak_{feld}_h_{tag}_{tagestyp}",
+            help=f"MET {met_werte[schluessel]['met']:g}. Nachkommastellen sind erlaubt, "
+            "7,5 entspricht 7 Stunden 30 Minuten.",
         )
+        arbeit[feld] = round(stunden * 60)
+
+    st.caption(
+        "Arbeitszeit zusammen: "
+        + f"{sum(arbeit.values())} Minuten ({_dauer(sum(arbeit.values()))})."
+    )
 
     knopf1, knopf2 = st.columns(2)
     if knopf1.button("Tag speichern", type="primary"):
