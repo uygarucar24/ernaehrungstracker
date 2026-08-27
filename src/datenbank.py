@@ -531,6 +531,44 @@ def sporteinheit_loeschen(einheit_id: int) -> None:
         con.execute("DELETE FROM sporteinheit WHERE einheit_id = ?", (einheit_id,))
 
 
+def gewicht_speichern(
+    profil_id: int, datum: date, gewicht_kg: float, notiz: str | None = None
+) -> None:
+    """Ein Eintrag je Profil und Tag. Ein zweiter Eintrag ersetzt den ersten."""
+    if gewicht_kg <= 0:
+        raise DatenFehler("Das Gewicht muss größer als 0 sein.")
+
+    with verbindung() as con:
+        con.execute(
+            "INSERT INTO gewicht (profil_id, datum, gewicht_kg, notiz) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT (profil_id, datum) DO UPDATE SET gewicht_kg = excluded.gewicht_kg, "
+            "notiz = excluded.notiz",
+            (profil_id, datum.isoformat(), float(gewicht_kg), notiz),
+        )
+
+
+def gewicht_am(profil_id: int, datum: date) -> sqlite3.Row | None:
+    """Eintrag genau an diesem Tag, nicht der zuletzt bekannte davor."""
+    with verbindung() as con:
+        return con.execute(
+            "SELECT datum, gewicht_kg, notiz FROM gewicht WHERE profil_id = ? AND datum = ?",
+            (profil_id, datum.isoformat()),
+        ).fetchone()
+
+
+def gewichtsverlauf(profil_id: int, von: date | None = None) -> list[sqlite3.Row]:
+    """Alle Gewichtseinträge ab einem Datum, aufsteigend. Tage ohne Eintrag fehlen."""
+    bedingung = " AND datum >= ?" if von else ""
+    werte = (profil_id, von.isoformat()) if von else (profil_id,)
+    with verbindung() as con:
+        return con.execute(
+            "SELECT datum, gewicht_kg FROM gewicht WHERE profil_id = ?"
+            + bedingung
+            + " ORDER BY datum",
+            werte,
+        ).fetchall()
+
+
 def gewicht_bis(profil_id: int, datum: date) -> sqlite3.Row | None:
     """Zuletzt bekanntes Gewicht vor oder an diesem Datum."""
     with verbindung() as con:
