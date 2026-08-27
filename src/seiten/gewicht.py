@@ -73,61 +73,74 @@ def _erfassung(profil_id: int) -> None:
 # --------------------------------------------------------------------------- #
 # Verlauf
 # --------------------------------------------------------------------------- #
-def _tabelle(eintraege: list) -> pd.DataFrame:
-    """Eine Zeile je erfasstem Tag, dazu der gleitende Durchschnitt.
+def _tabelle(eintraege: list, von: date | None) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Liefert (Messwerte, Durchschnitt) als zwei getrennte Reihen.
 
-    Das Fenster ist ein Kalenderfenster von sieben Tagen: der Tag selbst und
-    die sechs davor. Gemittelt werden alle Werte, die darin liegen, also
-    zwischen einem und sieben. Ein Wert, der weiter als sechs Tage zurückliegt,
-    fällt aus dem Fenster.
+    Messwerte enthält nur Tage mit Eintrag. Der Durchschnitt wird dagegen für
+    jeden Kalendertag gerechnet, in dessen Fenster mindestens ein Messwert
+    liegt, auch wenn an dem Tag selbst nicht gewogen wurde. Das Fenster ist der
+    Tag selbst plus die sechs davor; ein älterer Wert fällt heraus.
+
+    Der Durchschnitt endet spätestens heute, es wird nicht in die Zukunft
+    gezeichnet.
     """
-    erfasst = pd.DataFrame(
+    roh = pd.DataFrame(
         {
             "datum": pd.to_datetime([zeile["datum"] for zeile in eintraege]),
             "gewicht": [float(zeile["gewicht_kg"]) for zeile in eintraege],
         }
     ).sort_values("datum")
 
-    erfasst["schnitt"] = (
-        erfasst.set_index("datum")["gewicht"]
-        .rolling(window=f"{FENSTER_TAGE}D", min_periods=1)
-        .mean()
-        .to_numpy()
-    )
-    return erfasst.reset_index(drop=True)
+    erster, letzter = roh["datum"].min(), roh["datum"].max()
+    ende = min(pd.Timestamp(date.today()), letzter + pd.Timedelta(days=FENSTER_TAGE - 1))
+    kalender = pd.date_range(start=erster, end=max(ende, letzter), freq="D")
+
+    # Tage ohne Eintrag stehen als leere Werte im Kalender. rolling() mittelt
+    # nur die vorhandenen Werte im Fenster, min_periods zählt ebenfalls nur sie.
+    reihe = roh.set_index("datum")["gewicht"].reindex(kalender)
+    schnitt = pd.DataFrame(
+        {
+            "datum": kalender,
+            "schnitt": reihe.rolling(window=f"{FENSTER_TAGE}D", min_periods=1).mean().to_numpy(),
+        }
+    ).dropna(subset=["schnitt"])
+
+    if von is not None:
+        grenze = pd.Timestamp(von)
+        roh = roh[roh["datum"] >= grenze]
+        schnitt = schnitt[schnitt["datum"] >= grenze]
+
+    return roh.reset_index(drop=True), schnitt.reset_index(drop=True)
 
 
-def _diagramm(daten: pd.DataFrame) -> alt.LayerChart:
+def _diagramm(messwerte: pd.DataFrame, schnittwerte: pd.DataFrame) -> alt.LayerChart:
     x = alt.X("datum:T", title="Datum", axis=alt.Axis(format="%d.%m.%y"))
-    y = alt.Y(
-        "gewicht:Q",
-        title="Gewicht in kg",
-        scale=alt.Scale(zero=False, nice=True),
-    )
+    skala = alt.Scale(zero=False, nice=True)
 
     tageswerte = (
-        alt.Chart(daten)
-        .mark_line(color=FARBE_TAG, strokeWidth=1.5, opacity=0.9,
-                   point=alt.OverlayMarkDef(color=FARBE_TAG, size=28))
+        alt.Chart(messwerte)
+        .mark_line(
+            color=FARBE_TAG,
+            strokeWidth=1.5,
+            opacity=0.9,
+            point=alt.OverlayMarkDef(color=FARBE_TAG, size=28),
+        )
         .encode(
             x=x,
-            y=y,
+            y=alt.Y("gewicht:Q", title="Gewicht in kg", scale=skala),
             tooltip=[
                 alt.Tooltip("datum:T", title="Datum", format="%d.%m.%Y"),
                 alt.Tooltip("gewicht:Q", title="Gewicht", format=".1f"),
             ],
         )
     )
+    # Bewusst ohne Punkte: eine berechnete Kurve, keine Messreihe.
     schnitt = (
-        alt.Chart(daten)
-        .mark_line(
-            color=FARBE_SCHNITT,
-            strokeWidth=3,
-            point=alt.OverlayMarkDef(color=FARBE_SCHNITT, size=45),
-        )
+        alt.Chart(schnittwerte)
+        .mark_line(color=FARBE_SCHNITT, strokeWidth=3)
         .encode(
             x=x,
-            y=alt.Y("schnitt:Q", title="Gewicht in kg", scale=alt.Scale(zero=False, nice=True)),
+            y=alt.Y("schnitt:Q", title="Gewicht in kg", scale=skala),
             tooltip=[
                 alt.Tooltip("datum:T", title="Datum", format="%d.%m.%Y"),
                 alt.Tooltip("schnitt:Q", title="7-Tage-Schnitt", format=".2f"),
@@ -150,15 +163,23 @@ def _verlauf(profil_id: int) -> None:
     tage = ZEITRAEUME[schluessel][1]
     von = date.today() - timedelta(days=tage) if tage else None
 
-    eintraege = datenbank.gewichtsverlauf(profil_id, von)
-    if not eintraege:
+    # Sechs Tage Vorlauf, damit der Durchschnitt am Anfang des Zeitraums nicht
+    # abgeschnitten ist. Gezeichnet und gezählt wird trotzdem erst ab von.
+    vorlauf = von - timedelta(days=FENSTER_TAGE - 1) if von else None
+    eintraege = datenbank.gewichtsverlauf(profil_id, vorlauf)
+    im_zeitraum = [
+        zeile
+        for zeile in eintraege
+        if von is None or date.fromisoformat(str(zeile["datum"])) >= von
+    ]
+    if not im_zeitraum:
         st.info("Für diesen Zeitraum ist noch kein Gewicht erfasst.")
         return
 
-    daten = _tabelle(eintraege)
-    st.altair_chart(_diagramm(daten), width="stretch")
+    messwerte, schnittwerte = _tabelle(eintraege, von)
+    st.altair_chart(_diagramm(messwerte, schnittwerte), width="stretch")
 
-    anzahl = len(eintraege)
+    anzahl = len(im_zeitraum)
     if tage:
         zeitraum_tage = tage
     else:
