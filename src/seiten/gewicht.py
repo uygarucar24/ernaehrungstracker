@@ -1,8 +1,8 @@
 """Seite Gewicht: Erfassung je Datum und Verlauf als Diagramm.
 
-Tage ohne Eintrag bleiben Lücken. Es wird nicht interpoliert und keine Linie
-über eine Lücke gezogen: fehlende Tage stehen als leere Werte in den Daten,
-und beide Linien brechen dort ab.
+Gezeichnet werden nur Tage mit Eintrag. Tage ohne Eintrag werden übersprungen,
+beide Linien laufen durch. Die Punkte zeigen, an welchen Tagen tatsächlich
+gemessen wurde.
 """
 from __future__ import annotations
 
@@ -14,9 +14,10 @@ import streamlit as st
 
 from src import datenbank
 
-# Der gleitende Durchschnitt läuft über sieben erfasste Werte und beginnt
-# erst, wenn sieben vorliegen.
-FENSTER = 7
+# Der gleitende Durchschnitt läuft über ein Kalenderfenster: der Tag selbst und
+# die sechs Tage davor. Wie viele Werte darin liegen, ist offen, es können eins
+# bis sieben sein.
+FENSTER_TAGE = 7
 
 ZEITRAEUME = {
     "vier_wochen": ("Letzte 4 Wochen", 28),
@@ -72,12 +73,13 @@ def _erfassung(profil_id: int) -> None:
 # --------------------------------------------------------------------------- #
 # Verlauf
 # --------------------------------------------------------------------------- #
-def _tabelle(eintraege: list, von: date | None) -> pd.DataFrame:
-    """Baut eine Zeile je Kalendertag; Tage ohne Eintrag bleiben leer.
+def _tabelle(eintraege: list) -> pd.DataFrame:
+    """Eine Zeile je erfasstem Tag, dazu der gleitende Durchschnitt.
 
-    Der gleitende Durchschnitt wird über die erfassten Werte gerechnet und
-    danach wieder auf ihre Tage gelegt. So steht an einem Tag ohne Eintrag
-    auch kein Durchschnitt, und beide Linien brechen an der Lücke ab.
+    Das Fenster ist ein Kalenderfenster von sieben Tagen: der Tag selbst und
+    die sechs davor. Gemittelt werden alle Werte, die darin liegen, also
+    zwischen einem und sieben. Ein Wert, der weiter als sechs Tage zurückliegt,
+    fällt aus dem Fenster.
     """
     erfasst = pd.DataFrame(
         {
@@ -85,20 +87,14 @@ def _tabelle(eintraege: list, von: date | None) -> pd.DataFrame:
             "gewicht": [float(zeile["gewicht_kg"]) for zeile in eintraege],
         }
     ).sort_values("datum")
-    erfasst["schnitt"] = (
-        erfasst["gewicht"].rolling(window=FENSTER, min_periods=FENSTER).mean()
-    )
 
-    beginn = pd.Timestamp(von) if von else erfasst["datum"].min()
-    alle_tage = pd.date_range(start=min(beginn, erfasst["datum"].min()),
-                              end=max(erfasst["datum"].max(), pd.Timestamp(date.today())),
-                              freq="D")
-    return (
-        erfasst.set_index("datum")
-        .reindex(alle_tage)
-        .rename_axis("datum")
-        .reset_index()
+    erfasst["schnitt"] = (
+        erfasst.set_index("datum")["gewicht"]
+        .rolling(window=f"{FENSTER_TAGE}D", min_periods=1)
+        .mean()
+        .to_numpy()
     )
+    return erfasst.reset_index(drop=True)
 
 
 def _diagramm(daten: pd.DataFrame) -> alt.LayerChart:
@@ -124,7 +120,11 @@ def _diagramm(daten: pd.DataFrame) -> alt.LayerChart:
     )
     schnitt = (
         alt.Chart(daten)
-        .mark_line(color=FARBE_SCHNITT, strokeWidth=3)
+        .mark_line(
+            color=FARBE_SCHNITT,
+            strokeWidth=3,
+            point=alt.OverlayMarkDef(color=FARBE_SCHNITT, size=45),
+        )
         .encode(
             x=x,
             y=alt.Y("schnitt:Q", title="Gewicht in kg", scale=alt.Scale(zero=False, nice=True)),
@@ -155,21 +155,21 @@ def _verlauf(profil_id: int) -> None:
         st.info("Für diesen Zeitraum ist noch kein Gewicht erfasst.")
         return
 
-    daten = _tabelle(eintraege, von)
+    daten = _tabelle(eintraege)
     st.altair_chart(_diagramm(daten), width="stretch")
 
-    mit_schnitt = int(daten["schnitt"].notna().sum())
     anzahl = len(eintraege)
+    if tage:
+        zeitraum_tage = tage
+    else:
+        erster = date.fromisoformat(str(eintraege[0]["datum"]))
+        zeitraum_tage = (date.today() - erster).days + 1
+
     st.caption(
         "Die Darstellung beruht auf "
         + ("einem erfassten Tag" if anzahl == 1 else f"{anzahl} erfassten Tagen")
-        + " im gewählten Zeitraum."
+        + f". Der gewählte Zeitraum umfasst {zeitraum_tage} Tage."
     )
-    if mit_schnitt == 0:
-        st.caption(
-            f"Der gleitende Durchschnitt beginnt ab dem {FENSTER}. Wert; "
-            f"bisher liegen {len(eintraege)} vor."
-        )
 
 
 # --------------------------------------------------------------------------- #
