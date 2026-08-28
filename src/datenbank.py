@@ -282,28 +282,45 @@ def lebensmittel_suchen(text: str, grenze: int = 50) -> list[sqlite3.Row]:
     with verbindung() as con:
         # SQLite kennt kleingeschriebene Umlaute nicht, deshalb Pythons lower().
         con.create_function("klein", 1, lambda wert: (wert or "").lower())
-        return con.execute(
-            "SELECT l.lebensmittel_id, l.bezeichnung, ("
-            "  SELECT w.wert_je_100g FROM naehrwert w JOIN naehrstoff n"
-            "  ON n.naehrstoff_id = w.naehrstoff_id"
-            "  WHERE w.lebensmittel_id = l.lebensmittel_id AND n.bls_spalte = 'ENERCC'"
-            ") AS kcal_je_100g "
-            "FROM lebensmittel l "
-            f"WHERE l.archiviert = 0 AND {bedingungen} "
-            "ORDER BY LENGTH(l.bezeichnung), l.bezeichnung LIMIT ?",
-            [f"%{begriff}%" for begriff in begriffe] + [grenze],
-        ).fetchall()
+        try:
+            return con.execute(
+                "SELECT l.lebensmittel_id, l.bezeichnung, ("
+                "  SELECT w.wert_je_100g FROM naehrwert w JOIN naehrstoff n"
+                "  ON n.naehrstoff_id = w.naehrstoff_id"
+                "  WHERE w.lebensmittel_id = l.lebensmittel_id AND n.bls_spalte = 'ENERCC'"
+                ") AS kcal_je_100g "
+                "FROM lebensmittel l "
+                f"WHERE l.archiviert = 0 AND {bedingungen} "
+                "ORDER BY LENGTH(l.bezeichnung), l.bezeichnung LIMIT ?",
+                [f"%{begriff}%" for begriff in begriffe] + [grenze],
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []  # lebensmittel gibt es noch nicht, import_bls.py fehlt
+
+
+def lebensmittel_anzahl() -> int:
+    """Anzahl nutzbarer Lebensmittel. 0 heißt: import_bls.py lief noch nicht."""
+    with verbindung() as con:
+        try:
+            return con.execute(
+                "SELECT COUNT(*) FROM lebensmittel WHERE archiviert = 0"
+            ).fetchone()[0]
+        except sqlite3.OperationalError:
+            return 0
 
 
 def naehrstoffe(codes: tuple[str, ...]) -> dict[str, sqlite3.Row]:
     """Stammdaten je BLS-Code. Die Einheit steht ausschließlich in naehrstoff."""
     platzhalter = ",".join("?" * len(codes))
     with verbindung() as con:
-        zeilen = con.execute(
-            f"SELECT naehrstoff_id, bls_spalte, name, einheit FROM naehrstoff "
-            f"WHERE bls_spalte IN ({platzhalter})",
-            codes,
-        ).fetchall()
+        try:
+            zeilen = con.execute(
+                f"SELECT naehrstoff_id, bls_spalte, name, einheit FROM naehrstoff "
+                f"WHERE bls_spalte IN ({platzhalter})",
+                codes,
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return {}  # naehrstoff gibt es noch nicht, import_bls.py fehlt
     return {zeile["bls_spalte"]: zeile for zeile in zeilen}
 
 
@@ -318,41 +335,50 @@ def naehrwerte(lebensmittel_ids: list[int], codes: tuple[str, ...]) -> dict[tupl
     lm_platzhalter = ",".join("?" * len(lebensmittel_ids))
     code_platzhalter = ",".join("?" * len(codes))
     with verbindung() as con:
-        zeilen = con.execute(
-            "SELECT w.lebensmittel_id, n.bls_spalte, w.wert_je_100g "
-            "FROM naehrwert w JOIN naehrstoff n ON n.naehrstoff_id = w.naehrstoff_id "
-            f"WHERE w.lebensmittel_id IN ({lm_platzhalter}) "
-            f"AND n.bls_spalte IN ({code_platzhalter})",
-            list(lebensmittel_ids) + list(codes),
-        ).fetchall()
+        try:
+            zeilen = con.execute(
+                "SELECT w.lebensmittel_id, n.bls_spalte, w.wert_je_100g "
+                "FROM naehrwert w JOIN naehrstoff n ON n.naehrstoff_id = w.naehrstoff_id "
+                f"WHERE w.lebensmittel_id IN ({lm_platzhalter}) "
+                f"AND n.bls_spalte IN ({code_platzhalter})",
+                list(lebensmittel_ids) + list(codes),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return {}  # naehrwert gibt es noch nicht, import_bls.py fehlt
     return {(z["lebensmittel_id"], z["bls_spalte"]): z["wert_je_100g"] for z in zeilen}
 
 
 def mahlzeit_positionen(profil_id: int, datum: date, tagesabschnitt: str) -> list[sqlite3.Row]:
     """Positionen einer Mahlzeit in der Reihenfolge ihrer Erfassung."""
     with verbindung() as con:
-        return con.execute(
-            "SELECT p.position_id, p.lebensmittel_id, p.menge_g, l.bezeichnung "
-            "FROM mahlzeit_position p "
-            "JOIN mahlzeit m ON m.mahlzeit_id = p.mahlzeit_id "
-            "JOIN lebensmittel l ON l.lebensmittel_id = p.lebensmittel_id "
-            "WHERE m.profil_id = ? AND m.datum = ? AND m.tagesabschnitt = ? "
-            "ORDER BY p.position_id",
-            (profil_id, datum.isoformat(), tagesabschnitt),
-        ).fetchall()
+        try:
+            return con.execute(
+                "SELECT p.position_id, p.lebensmittel_id, p.menge_g, l.bezeichnung "
+                "FROM mahlzeit_position p "
+                "JOIN mahlzeit m ON m.mahlzeit_id = p.mahlzeit_id "
+                "JOIN lebensmittel l ON l.lebensmittel_id = p.lebensmittel_id "
+                "WHERE m.profil_id = ? AND m.datum = ? AND m.tagesabschnitt = ? "
+                "ORDER BY p.position_id",
+                (profil_id, datum.isoformat(), tagesabschnitt),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []  # lebensmittel gibt es noch nicht, import_bls.py fehlt
 
 
 def mahlzeiten_am_tag(profil_id: int, datum: date) -> list[sqlite3.Row]:
     """Alle Positionen aller Mahlzeiten eines Tages, mit Tagesabschnitt."""
     with verbindung() as con:
-        return con.execute(
-            "SELECT m.tagesabschnitt, p.position_id, p.lebensmittel_id, p.menge_g, "
-            "l.bezeichnung FROM mahlzeit m "
-            "JOIN mahlzeit_position p ON p.mahlzeit_id = m.mahlzeit_id "
-            "JOIN lebensmittel l ON l.lebensmittel_id = p.lebensmittel_id "
-            "WHERE m.profil_id = ? AND m.datum = ? ORDER BY p.position_id",
-            (profil_id, datum.isoformat()),
-        ).fetchall()
+        try:
+            return con.execute(
+                "SELECT m.tagesabschnitt, p.position_id, p.lebensmittel_id, p.menge_g, "
+                "l.bezeichnung FROM mahlzeit m "
+                "JOIN mahlzeit_position p ON p.mahlzeit_id = m.mahlzeit_id "
+                "JOIN lebensmittel l ON l.lebensmittel_id = p.lebensmittel_id "
+                "WHERE m.profil_id = ? AND m.datum = ? ORDER BY p.position_id",
+                (profil_id, datum.isoformat()),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []  # lebensmittel gibt es noch nicht, import_bls.py fehlt
 
 
 def position_hinzufuegen(

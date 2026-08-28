@@ -49,6 +49,13 @@ def _treffer_text(zeile) -> str:
 def _erfassung(profil_id: int, datum: date, tagesabschnitt: str) -> None:
     st.subheader("Lebensmittel hinzufügen")
 
+    if datenbank.lebensmittel_anzahl() == 0:
+        st.warning(
+            "Es sind keine Lebensmittel hinterlegt. Bitte zuerst "
+            "`python import_bls.py` ausführen."
+        )
+        return
+
     suchtext = st.text_input(
         "Suche in der Bezeichnung",
         key="mz_suche",

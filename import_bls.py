@@ -9,7 +9,7 @@ KEINE Zeile in naehrwert angelegt. Eine echte 0 aus der Quelle wird gespeichert.
 
 Aufruf:
     python import_bls.py
-    python import_bls.py --ersetzen      # vorhandene BLS-Daten vorher entfernen
+    python import_bls.py --ersetzen      # vorhandene Eintraege aktualisieren
 """
 
 import argparse
@@ -174,12 +174,31 @@ def bestehende_bls_daten(verbindung):
         return 0
 
 
-def entferne_bls_daten(verbindung):
-    verbindung.execute(
-        "DELETE FROM naehrwert WHERE lebensmittel_id IN "
-        "(SELECT lebensmittel_id FROM lebensmittel WHERE herkunft = 'bls')"
-    )
-    verbindung.execute("DELETE FROM lebensmittel WHERE herkunft = 'bls'")
+def vorhandene_schluessel(verbindung):
+    """bls_schluessel -> lebensmittel_id der bereits angelegten BLS-Lebensmittel."""
+    try:
+        zeilen = verbindung.execute(
+            "SELECT bls_schluessel, lebensmittel_id FROM lebensmittel "
+            "WHERE herkunft = 'bls' AND bls_schluessel IS NOT NULL"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    return {schluessel: kennung for schluessel, kennung in zeilen}
+
+
+def entferne_naehrwerte(verbindung, kennungen):
+    """Löscht die Nährwerte der genannten Lebensmittel, nicht die Lebensmittel selbst.
+
+    Auf naehrwert verweist nichts, auf lebensmittel dagegen schon: Positionen in
+    mahlzeit_position. Deshalb bleiben die Zeilen in lebensmittel bestehen und
+    behalten ihre lebensmittel_id, damit erfasste Mahlzeiten gültig bleiben.
+    """
+    for anfang in range(0, len(kennungen), 500):
+        teil = kennungen[anfang : anfang + 500]
+        platzhalter = ",".join("?" * len(teil))
+        verbindung.execute(
+            f"DELETE FROM naehrwert WHERE lebensmittel_id IN ({platzhalter})", teil
+        )
 
 
 def schreibe_naehrstoffe(verbindung):
@@ -210,11 +229,14 @@ def importiere(quelle, datenbank, ersetzen):
         verbindung.close()
         sys.exit(
             f"Abbruch. In {datenbank.name} stehen bereits {vorhanden} BLS-Lebensmittel.\n"
-            "Erneut importieren mit: python import_bls.py --ersetzen"
+            "Erneut einlesen mit: python import_bls.py --ersetzen\n"
+            "Dabei werden vorhandene Eintraege anhand ihres BLS-Schluessels aktualisiert, "
+            "nicht geloescht; erfasste Mahlzeiten bleiben gueltig."
         )
+    bekannt = vorhandene_schluessel(verbindung)
     if vorhanden:
-        print(f"Ersetze {vorhanden} vorhandene BLS-Lebensmittel.")
-        entferne_bls_daten(verbindung)
+        print(f"Aktualisiere {vorhanden} vorhandene BLS-Lebensmittel anhand ihres Schluessels.")
+        entferne_naehrwerte(verbindung, list(bekannt.values()))
 
     schreibe_naehrstoffe(verbindung)
 
@@ -226,6 +248,9 @@ def importiere(quelle, datenbank, ersetzen):
     pruefe_kopfzeile(kopf)
 
     anzahl_lebensmittel = 0
+    neu = 0
+    aktualisiert = 0
+    gesehen = set()
     zeilen_gelesen = 0
     ohne_bezeichnung = 0
     mit_wert = Counter()
@@ -244,13 +269,27 @@ def importiere(quelle, datenbank, ersetzen):
             ohne_bezeichnung += 1
             bezeichnung = schluessel
 
-        cursor = verbindung.execute(
-            "INSERT INTO lebensmittel "
-            "(herkunft, bls_schluessel, bezeichnung, basis_menge_g, hersteller, archiviert) "
-            "VALUES ('bls', ?, ?, 100, NULL, 0)",
-            (schluessel, bezeichnung),
-        )
-        lebensmittel_id = cursor.lastrowid
+        gesehen.add(schluessel)
+        lebensmittel_id = bekannt.get(schluessel)
+        if lebensmittel_id is None:
+            cursor = verbindung.execute(
+                "INSERT INTO lebensmittel "
+                "(herkunft, bls_schluessel, bezeichnung, basis_menge_g, hersteller, archiviert) "
+                "VALUES ('bls', ?, ?, 100, NULL, 0)",
+                (schluessel, bezeichnung),
+            )
+            lebensmittel_id = cursor.lastrowid
+            bekannt[schluessel] = lebensmittel_id
+            neu += 1
+        else:
+            # Kennung bleibt erhalten, damit Verweise aus mahlzeit_position gültig
+            # bleiben. Ein früher archivierter Eintrag ist wieder aktuell.
+            verbindung.execute(
+                "UPDATE lebensmittel SET bezeichnung = ?, archiviert = 0 "
+                "WHERE lebensmittel_id = ?",
+                (bezeichnung, lebensmittel_id),
+            )
+            aktualisiert += 1
         anzahl_lebensmittel += 1
 
         for nid, code, _, _, _, _, spalte_wert, spalte_herkunft in NAEHRSTOFFE:
@@ -270,6 +309,19 @@ def importiere(quelle, datenbank, ersetzen):
             )
             mit_wert[code] += 1
 
+    # Was in dieser Ausgabe fehlt, wird archiviert statt gelöscht, damit alte
+    # Mahlzeiten nachvollziehbar bleiben.
+    verschwunden = [
+        kennung for schluessel, kennung in bekannt.items() if schluessel not in gesehen
+    ]
+    for anfang in range(0, len(verschwunden), 500):
+        teil = verschwunden[anfang : anfang + 500]
+        platzhalter = ",".join("?" * len(teil))
+        verbindung.execute(
+            f"UPDATE lebensmittel SET archiviert = 1 WHERE lebensmittel_id IN ({platzhalter})",
+            teil,
+        )
+
     verbindung.commit()
     mappe.close()
 
@@ -285,6 +337,9 @@ def importiere(quelle, datenbank, ersetzen):
         uebersprungen,
         gruende,
         unbekannte_marker,
+        neu=neu,
+        aktualisiert=aktualisiert,
+        archiviert=len(verschwunden),
     )
 
 
@@ -297,11 +352,17 @@ def bericht(
     uebersprungen,
     gruende,
     unbekannte_marker,
+    neu=0,
+    aktualisiert=0,
+    archiviert=0,
 ):
     print()
     print("Import abgeschlossen")
     print(f"  Datenzeilen gelesen:       {zeilen_gelesen}")
-    print(f"  Lebensmittel importiert:   {anzahl_lebensmittel}")
+    print(f"  Lebensmittel verarbeitet:  {anzahl_lebensmittel}")
+    print(f"    davon neu angelegt:      {neu}")
+    print(f"    davon aktualisiert:      {aktualisiert}")
+    print(f"  archiviert (nicht mehr in der Quelle): {archiviert}")
     print(f"  Zeilen in naehrwert:       {zeilen_naehrwert}")
     if ohne_bezeichnung:
         print(f"  Ohne Bezeichnung (Schluessel eingesetzt): {ohne_bezeichnung}")
@@ -344,7 +405,7 @@ def main():
     parser.add_argument(
         "--ersetzen",
         action="store_true",
-        help="vorhandene BLS-Daten vor dem Import entfernen",
+        help="vorhandene Eintraege anhand ihres BLS-Schluessels aktualisieren",
     )
     argumente = parser.parse_args()
     importiere(argumente.quelle, argumente.db, argumente.ersetzen)

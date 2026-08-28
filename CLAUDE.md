@@ -62,6 +62,12 @@ Rate.
 | hersteller | TEXT NULL | |
 | archiviert | INTEGER | |
 
+Ein erneuter Lauf von `import_bls.py --ersetzen` **aktualisiert** vorhandene Einträge
+anhand von `bls_schluessel` und ersetzt ihre Nährwerte. Die `lebensmittel_id` bleibt
+erhalten, damit Verweise aus `mahlzeit_position` gültig bleiben. Einträge, die in der
+neuen Ausgabe fehlen, werden auf `archiviert = 1` gesetzt, nicht gelöscht, damit alte
+Mahlzeiten nachvollziehbar bleiben. Die Suche zeigt nur nicht archivierte Einträge.
+
 ### naehrstoff
 | Spalte | Typ | Hinweis |
 |---|---|---|
