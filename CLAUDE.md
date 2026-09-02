@@ -181,9 +181,12 @@ den Import auszuführen.
 | name | TEXT | Granularität der Quelle |
 | met_wert | REAL | aus dem Compendium of Physical Activities |
 | quelle | TEXT | Quellencode aus der CSV |
+| kategorie | TEXT | joggen / fahrrad / kraftsport, nach Codepräfix 12 / 01 / 02 |
 
 Befüllt aus `daten/sportarten.csv` über `import_sportarten.py`. Ein zweiter Lauf
-aktualisiert vorhandene Codes, statt Duplikate anzulegen.
+aktualisiert vorhandene Codes, statt Duplikate anzulegen. Die Oberfläche wählt in zwei
+Schritten: erst die Kategorie, dann die Intensität innerhalb der Kategorie, mit
+sichtbarem MET-Wert.
 
 ### sporteinheit
 | Spalte | Typ |

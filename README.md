@@ -1,26 +1,198 @@
-# Ernährungstracker
+# Ernährungs- und Bewegungstracker
 
-Erfassung und Auswertung von Ernährungsdaten (z. B. Mahlzeiten, Kalorien, Makronährstoffe).
+Lokal laufende Anwendung zur Erfassung von Mahlzeiten, Tagesaktivität, Sport und Gewicht,
+umgesetzt mit **Python**, **Streamlit** und **SQLite**.
 
-## Status
+Keine Cloud, keine Nutzerkonten, keine Netzverbindung erforderlich. Alle Daten stehen in
+einer einzigen Datei `tracker.db` im Projektordner. Nährwertquelle ist der
+Bundeslebensmittelschlüssel 4.0 des Max Rubner-Instituts, die MET-Werte stammen aus dem
+Compendium of Physical Activities 2024.
 
-Projektgerüst — Inhalte folgen.
+## Was die Anwendung besonders macht
 
-## Struktur
+Der Tagesbedarf wird **aus dem tatsächlichen Tagesablauf** berechnet, nicht über einen
+einmalig gewählten Aktivitätsfaktor. Der Tag hat 1440 Minuten und wird vollständig in vier
+Blöcke aufgeteilt:
 
-    ernaehrungstracker/
-    ├── data/            # Rohdaten (lokal, nicht im Repo)
-    ├── src/             # Python-Module
-    ├── requirements.txt
-    └── README.md
+| Block | Erfassung |
+|---|---|
+| Schlaf | in Stunden und Minuten |
+| Arbeit, nach Haltung getrennt (sitzend, stehend, Veranstaltung) | in Stunden, Vorlage je Tagestyp |
+| Sport, je Einheit | Kategorie, Intensität, Dauer in Minuten |
+| Restzeit | **nicht erfasst**, sondern berechnet: 1440 − Schlaf − Arbeit − Sport |
 
-## Setup
+Jeder Block geht mit seinem eigenen MET-Wert ein: `(MET − 1) × Gewicht in kg × Stunden`.
+Der Abzug von 1 MET ist zwingend, weil der Ruheumsatz bereits im Grundumsatz steckt.
+
+Dadurch verdrängt Arbeitszeit die Restzeit, statt zusätzlich zu ihr zu zählen: Ein Bürotag
+mit vier Stunden Stehen ergibt einen anderen Bedarf als ein Homeoffice-Tag mit einer
+Stunde Stehen, obwohl beide acht Stunden Arbeit haben. Ergeben die erfassten Zeiten
+zusammen mehr als 24 Stunden, wird **kein** Bedarf ausgegeben, sondern ein Hinweis.
+
+## Voraussetzungen
+
+- Python 3.10 oder neuer
+- Die Quelldateien des Bundeslebensmittelschlüssels (siehe [Datenquellen](#datenquellen-und-lizenz)) —
+  sie liegen **nicht** im Repository
+
+## Einrichtung
+
+**1. Virtuelle Umgebung anlegen und aktivieren**
 
 ```bash
 python -m venv .venv
+```
+
+```bash
 .venv\Scripts\activate
+```
+
+Unter Linux oder macOS stattdessen `source .venv/bin/activate`.
+
+**2. Abhängigkeiten installieren**
+
+```bash
 pip install -r requirements.txt
 ```
+
+```bash
+pip install openpyxl
+```
+
+`openpyxl` wird nur vom einmaligen BLS-Import gebraucht und steht deshalb nicht in
+`requirements.txt`; die Anwendung selbst braucht es nicht.
+
+**3. BLS-Datei bereitlegen**
+
+Die Datei `BLS_4_0_Daten_2025_DE.xlsx` gehört unverändert in den Projektordner, also neben
+`app.py`. Sie ist wegen ihrer Größe und weil sie nicht zum Projekt gehört von der
+Versionsverwaltung ausgenommen.
+
+**4. Stammdaten importieren** (einmalig, in dieser Reihenfolge)
+
+```bash
+python import_bls.py
+```
+
+```bash
+python import_sportarten.py
+```
+
+```bash
+python import_met_grundwerte.py
+```
+
+Der erste Lauf legt `tracker.db` an und füllt sie mit 7140 Lebensmitteln und rund 57 000
+Nährwerten; das dauert etwa eine Minute. Die beiden anderen Skripte lesen
+`daten/sportarten.csv` und `daten/met_grundwerte.csv`, die im Repository liegen.
+
+Jedes Skript meldet am Ende, was es geschrieben hat. Ein zweiter Lauf erzeugt keine
+Duplikate: `import_sportarten.py` und `import_met_grundwerte.py` aktualisieren vorhandene
+Einträge, `import_bls.py` verlangt dafür ausdrücklich `--ersetzen` und aktualisiert dann
+anhand des BLS-Schlüssels, ohne Kennungen zu ändern — bereits erfasste Mahlzeiten bleiben
+gültig.
+
+**5. Anwendung starten**
+
+```bash
+streamlit run app.py
+```
+
+Der Browser öffnet sich auf http://localhost:8501. Das Terminalfenster muss offen bleiben,
+**Strg+C** beendet die Anwendung.
+
+## Aufbau
+
+```
+ernaehrungstracker/
+├── app.py                      Einstieg: Profilwahl in der Seitenleiste, Navigation
+├── import_bls.py               einmaliger Import des Bundeslebensmittelschlüssels
+├── import_sportarten.py        Import des Sportartenkatalogs
+├── import_met_grundwerte.py    Import der MET-Grundwerte
+├── daten/
+│   ├── sportarten.csv          25 Sportarten mit Code, MET-Wert, Quelle, Kategorie
+│   └── met_grundwerte.csv      MET-Werte für Schlaf, Arbeit und Restzeit
+├── src/
+│   ├── berechnung.py           Alter, Grundumsatz, Tagesblöcke, Kalorienziel, Summen
+│   ├── datenbank.py            Schema und sämtliche Datenzugriffe
+│   └── seiten/                 die fünf Seiten der Anwendung
+├── .claude/launch.json         Startkonfiguration für die Vorschau
+├── CLAUDE.md                   verbindliche Projektregeln und Datenmodell
+├── requirements.txt
+└── tracker.db                  wird beim Import angelegt, nicht im Repository
+```
+
+### Die fünf Seiten
+
+| Seite | Inhalt |
+|---|---|
+| **Profilverwaltung** | Profil anlegen (erwachsen oder Kind), Ziel als Modus abnehmen / zunehmen / halten mit Tempo ohne Vorzeichen, Laktoseintoleranz; Wechsel zwischen Profilen |
+| **Mahlzeiten** | Datum und Tagesabschnitt wählen, Lebensmittel über Textsuche finden, Menge in Gramm erfassen; Werte je Position und Summe mit Angabe der Abdeckung |
+| **Aktivität** | Schlaf, Tagestyp mit vorbelegten Arbeitszeiten, Sporteinheiten; Tagesbedarf mit Grundumsatz, Aktivitäts- und Sportanteil sowie vollständiger Aufschlüsselung des Tages |
+| **Gewicht** | Gewicht je Datum erfassen, Verlauf über vier Wochen, zwölf Monate oder gesamt, mit gleitendem Durchschnitt über ein Kalenderfenster von sieben Tagen |
+| **Tagesübersicht** | Bedarf, Kalorienziel, Aufnahme und Differenz an einem Tag, dazu die Mahlzeiten mit ihren Summen und die Makronährstoffe |
+
+## Datenquellen und Lizenz
+
+**Bundeslebensmittelschlüssel 4.0 (2025)** — herausgegeben vom Max Rubner-Institut,
+Bundesforschungsinstitut für Ernährung und Lebensmittel. Der BLS ist kostenfrei und
+lizenzfrei nutzbar. Bezug über die offizielle Seite des Instituts (blsdb.de). Übernommen
+werden acht Nährstoffe je Lebensmittel: Energie, Protein, Fett, gesättigte Fettsäuren,
+Kohlenhydrate, Zucker, Lactose und Salz.
+
+**Compendium of Physical Activities, 2024 Adult Compendium** — Herrmann SD, Willis EA,
+Ainsworth BE et al., *Journal of Sport and Health Science*, 2024, https://pacompendium.com.
+Die Nutzung verlangt eine **Quellenangabe**, und die **MET-Werte dürfen nicht verändert
+werden**. Sie stehen deshalb ausschließlich in `daten/sportarten.csv` und
+`daten/met_grundwerte.csv` und werden unverändert übernommen; im Programmcode steht kein
+einziger MET-Wert.
+
+## Grundregeln der Anwendung
+
+Ausführlich in [CLAUDE.md](CLAUDE.md), in Kurzform:
+
+1. **Unbekannt ist nicht null.** Fehlt ein Wert in der Quelle (Strich, „TR", Angabe unter
+   der Nachweisgrenze), entsteht keine Zeile und keine 0. Er wird als *unbekannt*
+   ausgewiesen und geht nicht in Summen ein. Eine echte 0 aus der Quelle wird gespeichert.
+2. **Abdeckung ausweisen.** Jede Summe nennt, auf wie vielen Positionen sie beruht.
+3. **Verweis statt Zahl.** Gespeichert werden Lebensmittel und Menge, nie ein berechneter
+   Nährwert. Die Werte werden bei jeder Anzeige frisch nachgeschlagen.
+4. **Berechnet, nachgeschlagen oder von der KI** bleiben in der Anzeige getrennt.
+5. **Keine Ersatzannahmen.** Ohne Aktivitätseintrag gibt es keinen Tagesbedarf, ohne
+   erfasste Mahlzeit keine Bilanz — nicht ersatzweise gegen den Grundumsatz oder eine
+   Aufnahme von 0 kcal gerechnet.
+6. **Der Profiltyp steuert.** Was ein Kinderprofil nicht bekommt, wird nicht ausgegraut,
+   sondern gar nicht erst aufgebaut. Kinderprofile haben kein Ziel, keine Arbeitszeit und
+   keinen Tagesbedarf.
+7. **Eine Einheit je Nährstoff**, sie steht ausschließlich in der Tabelle `naehrstoff`.
+8. **Keine medizinischen Aussagen.** Kein „Mangel", keine Ursachen für Beschwerden, keine
+   Ernährungsempfehlung — die Anwendung rechnet und weist aus.
+
+## Stand
+
+Umgesetzt:
+
+- Profile für Erwachsene und Kinder, Zielmodus mit Umstellung auf *halten* beim Erreichen
+  des Zielgewichts, Laktoseintoleranz mit Verweis auf den Lactose-Nährstoff
+- Mahlzeiten mit Textsuche im BLS, Positionen einzeln löschbar, Nährwerte je Position und
+  je Mahlzeit
+- Tagesstruktur mit Schlaf, Tagestypen, Sport in zwei Stufen (Kategorie, Intensität) und
+  vollständiger Tagesbedarfsrechnung samt Kalorienziel
+- Gewichtsverlauf mit gleitendem Durchschnitt über ein Kalenderfenster
+- Tagesübersicht als Zusammenführung von Bedarf und Aufnahme
+
+Offen:
+
+- Referenzwerte (`referenzwert`) und KI-Hinweise (`ki_hinweis`) sind im Datenmodell
+  beschrieben, die Tabellen werden aber noch nicht angelegt
+- Auswertung der Unverträglichkeiten in der Mahlzeitenansicht
+- Eigene Lebensmittel (`herkunft = 'eigen'`) lassen sich noch nicht über die Oberfläche
+  anlegen
+- Salz und gesättigte Fettsäuren werden importiert, aber noch nirgends angezeigt
+- CSV-Export (vorgesehen als UTF-8 mit BOM)
+
+Bewusst nicht vorgesehen sind Sätze und Wiederholungen im Training, Bilderkennung von
+Mahlzeiten, Wearable-Anbindung, Cloud-Speicherung und Rezepte.
 
 ## Autor
 

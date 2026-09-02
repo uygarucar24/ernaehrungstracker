@@ -7,12 +7,6 @@ venv/
 env/
 .ipynb_checkpoints/
 
-# Daten (lokale Rohdaten/Exporte nicht ins Repo)
-data/*.csv
-data/*.db
-data/*.xlsx
-!data/.gitkeep
-
 # Secrets
 .env
 *.secret
@@ -30,3 +24,9 @@ tracker.db
 # BLS-Quelldateien (nicht weitergeben, vom MRI beziehen)
 BLS_4_0_*.xlsx
 BLS_4_0_*.pdf
+
+# Arbeitsordner anderer Aufgaben, die zufaellig hier liegen
+.codex_doc_review/
+.docx_audit_phase2/
+tmp/
+output/
