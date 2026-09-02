@@ -7,8 +7,8 @@ Diese Tabelle ist die einzige Quelle für die MET-Werte von Schlaf, sitzender
 und stehender Arbeit, Veranstaltung und Restzeit. Im Code stehen keine
 MET-Werte mehr. Ein zweiter Lauf erzeugt keine Duplikate.
 
-Aufruf:
-    python import_met_grundwerte.py
+Aufruf aus dem Projektordner:
+    python importe/import_met_grundwerte.py
 """
 
 import argparse
@@ -17,7 +17,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
-BASIS = Path(__file__).resolve().parent
+# Das Skript liegt in importe/, die Datenbank und die Datenordner eine Ebene darueber.
+BASIS = Path(__file__).resolve().parent.parent
 QUELLE = BASIS / "daten" / "met_grundwerte.csv"
 DATENBANK = BASIS / "tracker.db"
 

@@ -861,7 +861,7 @@ def profil_anlegen(
     if laktoseintoleranz and lactose_id is None:
         raise DatenFehler(
             "Der Nährstoff Lactose (LACS) fehlt in der Datenbank. "
-            "Bitte zuerst import_bls.py ausführen."
+            "Bitte zuerst importe/import_bls.py ausführen."
         )
 
     with verbindung() as con:

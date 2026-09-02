@@ -21,7 +21,9 @@ Thumbs.db
 tracker.db
 *.db
 
-# BLS-Quelldateien (nicht weitergeben, vom MRI beziehen)
+# Quelldateien des BLS (nicht weitergeben, vom MRI beziehen)
+quellen/*
+!quellen/.gitkeep
 BLS_4_0_*.xlsx
 BLS_4_0_*.pdf
 

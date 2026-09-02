@@ -62,7 +62,7 @@ Rate.
 | hersteller | TEXT NULL | |
 | archiviert | INTEGER | |
 
-Ein erneuter Lauf von `import_bls.py --ersetzen` **aktualisiert** vorhandene Einträge
+Ein erneuter Lauf von `importe/import_bls.py --ersetzen` **aktualisiert** vorhandene Einträge
 anhand von `bls_schluessel` und ersetzt ihre Nährwerte. Die `lebensmittel_id` bleibt
 erhalten, damit Verweise aus `mahlzeit_position` gültig bleiben. Einträge, die in der
 neuen Ausgabe fehlen, werden auf `archiviert = 1` gesetzt, nicht gelöscht, damit alte
@@ -169,7 +169,7 @@ Kinderprofile kein Tagesbedarf berechnet wird.
 | code | TEXT | Code der Quelle |
 | quelle | TEXT | |
 
-Befüllt aus `daten/met_grundwerte.csv` über `import_met_grundwerte.py`. **Im Code stehen
+Befüllt aus `daten/met_grundwerte.csv` über `importe/import_met_grundwerte.py`. **Im Code stehen
 keine MET-Werte.** Fehlt ein Schlüssel, wird kein Bedarf ausgegeben, sondern der Hinweis,
 den Import auszuführen.
 
@@ -183,7 +183,7 @@ den Import auszuführen.
 | quelle | TEXT | Quellencode aus der CSV |
 | kategorie | TEXT | joggen / fahrrad / kraftsport, nach Codepräfix 12 / 01 / 02 |
 
-Befüllt aus `daten/sportarten.csv` über `import_sportarten.py`. Ein zweiter Lauf
+Befüllt aus `daten/sportarten.csv` über `importe/import_sportarten.py`. Ein zweiter Lauf
 aktualisiert vorhandene Codes, statt Duplikate anzulegen. Die Oberfläche wählt in zwei
 Schritten: erst die Kategorie, dann die Intensität innerhalb der Kategorie, mit
 sichtbarem MET-Wert.

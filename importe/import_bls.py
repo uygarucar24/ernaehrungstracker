@@ -1,15 +1,15 @@
 """Einmaliger Import des Bundeslebensmittelschluessels 4.0 in tracker.db.
 
-Nicht Teil der Anwendung. Liest BLS_4_0_Daten_2025_DE.xlsx und befuellt die
-Tabellen lebensmittel, naehrstoff und naehrwert.
+Nicht Teil der Anwendung. Liest quellen/BLS_4_0_Daten_2025_DE.xlsx und befuellt
+die Tabellen lebensmittel, naehrstoff und naehrwert.
 
 Grundregel: Unbekannt ist nicht null. Enthaelt eine Wertzelle einen Strich, "TR",
 eine Angabe unterhalb der Nachweis- oder Bestimmungsgrenze oder ist sie leer, wird
 KEINE Zeile in naehrwert angelegt. Eine echte 0 aus der Quelle wird gespeichert.
 
-Aufruf:
-    python import_bls.py
-    python import_bls.py --ersetzen      # vorhandene Eintraege aktualisieren
+Aufruf aus dem Projektordner:
+    python importe/import_bls.py
+    python importe/import_bls.py --ersetzen   # vorhandene Eintraege aktualisieren
 """
 
 import argparse
@@ -24,8 +24,9 @@ except ImportError:
     sys.exit("openpyxl fehlt. Installieren mit: pip install openpyxl")
 
 
-BASIS = Path(__file__).resolve().parent
-QUELLE = BASIS / "BLS_4_0_Daten_2025_DE.xlsx"
+# Das Skript liegt in importe/, die Datenbank und die Datenordner eine Ebene darueber.
+BASIS = Path(__file__).resolve().parent.parent
+QUELLE = BASIS / "quellen" / "BLS_4_0_Daten_2025_DE.xlsx"
 DATENBANK = BASIS / "tracker.db"
 
 # Spalten der Quelldatei, 1-basiert wie in Excel
@@ -229,7 +230,7 @@ def importiere(quelle, datenbank, ersetzen):
         verbindung.close()
         sys.exit(
             f"Abbruch. In {datenbank.name} stehen bereits {vorhanden} BLS-Lebensmittel.\n"
-            "Erneut einlesen mit: python import_bls.py --ersetzen\n"
+            "Erneut einlesen mit: python importe/import_bls.py --ersetzen\n"
             "Dabei werden vorhandene Eintraege anhand ihres BLS-Schluessels aktualisiert, "
             "nicht geloescht; erfasste Mahlzeiten bleiben gueltig."
         )

@@ -52,7 +52,7 @@ def _erfassung(profil_id: int, datum: date, tagesabschnitt: str) -> None:
     if datenbank.lebensmittel_anzahl() == 0:
         st.warning(
             "Es sind keine Lebensmittel hinterlegt. Bitte zuerst "
-            "`python import_bls.py` ausführen."
+            "`python importe/import_bls.py` ausführen."
         )
         return
 

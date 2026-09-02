@@ -187,7 +187,7 @@ def _sport(profil_id: int, datum: date) -> None:
     if not kategorien:
         st.warning(
             "Es sind keine Sportarten hinterlegt. Bitte zuerst "
-            "`python import_sportarten.py` ausführen."
+            "`python importe/import_sportarten.py` ausführen."
         )
     else:
         spalte1, spalte2, spalte3 = st.columns([1.2, 2, 1])
@@ -324,7 +324,7 @@ def _bedarf(profil_id: int, datum: date, met_werte: dict) -> None:
         st.warning(
             "Es fehlen MET-Grundwerte: "
             + ", ".join(ergebnis["fehlende_met"])
-            + ". Bitte `python import_met_grundwerte.py` ausführen."
+            + ". Bitte `python importe/import_met_grundwerte.py` ausführen."
         )
         return
     if status == "keine_aktivitaet":
@@ -405,7 +405,7 @@ def seite() -> None:
     if fehlend:
         st.error(
             "Die MET-Grundwerte fehlen (" + ", ".join(fehlend) + "). "
-            "Bitte `python import_met_grundwerte.py` ausführen."
+            "Bitte `python importe/import_met_grundwerte.py` ausführen."
         )
         return
 

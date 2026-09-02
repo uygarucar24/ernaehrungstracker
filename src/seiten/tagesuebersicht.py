@@ -98,7 +98,7 @@ def _bilanz(profil_id: int, datum: date, aufnahme: dict) -> None:
         st.warning(
             "Es fehlen MET-Grundwerte: "
             + ", ".join(ergebnis["fehlende_met"])
-            + ". Bitte `python import_met_grundwerte.py` ausführen."
+            + ". Bitte `python importe/import_met_grundwerte.py` ausführen."
         )
         return
     if status == "restzeit_negativ":

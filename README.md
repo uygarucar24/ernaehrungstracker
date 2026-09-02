@@ -64,22 +64,22 @@ pip install openpyxl
 
 **3. BLS-Datei bereitlegen**
 
-Die Datei `BLS_4_0_Daten_2025_DE.xlsx` gehört unverändert in den Projektordner, also neben
-`app.py`. Sie ist wegen ihrer Größe und weil sie nicht zum Projekt gehört von der
-Versionsverwaltung ausgenommen.
+Die Datei `BLS_4_0_Daten_2025_DE.xlsx` gehört unverändert in den Ordner `quellen/`. Er ist
+von der Versionsverwaltung ausgenommen, weil die Quelldateien groß sind und nicht zum
+Projekt gehören.
 
-**4. Stammdaten importieren** (einmalig, in dieser Reihenfolge)
+**4. Stammdaten importieren** (einmalig, in dieser Reihenfolge, aus dem Projektordner)
 
 ```bash
-python import_bls.py
+python importe/import_bls.py
 ```
 
 ```bash
-python import_sportarten.py
+python importe/import_sportarten.py
 ```
 
 ```bash
-python import_met_grundwerte.py
+python importe/import_met_grundwerte.py
 ```
 
 Der erste Lauf legt `tracker.db` an und füllt sie mit 7140 Lebensmitteln und rund 57 000
@@ -87,7 +87,7 @@ Nährwerten; das dauert etwa eine Minute. Die beiden anderen Skripte lesen
 `daten/sportarten.csv` und `daten/met_grundwerte.csv`, die im Repository liegen.
 
 Jedes Skript meldet am Ende, was es geschrieben hat. Ein zweiter Lauf erzeugt keine
-Duplikate: `import_sportarten.py` und `import_met_grundwerte.py` aktualisieren vorhandene
+Duplikate: die Importe für Sportarten und MET-Grundwerte aktualisieren vorhandene
 Einträge, `import_bls.py` verlangt dafür ausdrücklich `--ersetzen` und aktualisiert dann
 anhand des BLS-Schlüssels, ohne Kennungen zu ändern — bereits erfasste Mahlzeiten bleiben
 gültig.
@@ -105,21 +105,29 @@ Der Browser öffnet sich auf http://localhost:8501. Das Terminalfenster muss off
 
 ```
 ernaehrungstracker/
-├── app.py                      Einstieg: Profilwahl in der Seitenleiste, Navigation
-├── import_bls.py               einmaliger Import des Bundeslebensmittelschlüssels
-├── import_sportarten.py        Import des Sportartenkatalogs
-├── import_met_grundwerte.py    Import der MET-Grundwerte
-├── daten/
-│   ├── sportarten.csv          25 Sportarten mit Code, MET-Wert, Quelle, Kategorie
-│   └── met_grundwerte.csv      MET-Werte für Schlaf, Arbeit und Restzeit
+├── app.py                          Einstieg: Profilwahl, Navigation über fünf Seiten
 ├── src/
-│   ├── berechnung.py           Alter, Grundumsatz, Tagesblöcke, Kalorienziel, Summen
-│   ├── datenbank.py            Schema und sämtliche Datenzugriffe
-│   └── seiten/                 die fünf Seiten der Anwendung
-├── .claude/launch.json         Startkonfiguration für die Vorschau
-├── CLAUDE.md                   verbindliche Projektregeln und Datenmodell
+│   ├── berechnung.py               Alter, Grundumsatz, Tagesblöcke, Kalorienziel, Summen
+│   ├── datenbank.py                Schema und sämtliche Datenzugriffe
+│   └── seiten/                     je eine Datei pro Seite
+│       ├── profil.py
+│       ├── mahlzeiten.py
+│       ├── aktivitaet.py
+│       ├── gewicht.py
+│       └── tagesuebersicht.py
+├── importe/                        einmalige Skripte, nicht Teil der Anwendung
+│   ├── import_bls.py               Bundeslebensmittelschlüssel
+│   ├── import_sportarten.py        Sportartenkatalog
+│   └── import_met_grundwerte.py    MET-Grundwerte
+├── daten/                          Eingangsdaten, im Repository
+│   ├── sportarten.csv              25 Sportarten mit Code, MET-Wert, Quelle, Kategorie
+│   └── met_grundwerte.csv          MET-Werte für Schlaf, Arbeit und Restzeit
+├── quellen/                        BLS-Quelldateien, nicht im Repository
+├── .claude/launch.json             Startkonfiguration für die Vorschau
+├── CLAUDE.md                       verbindliche Projektregeln und Datenmodell
+├── README.md
 ├── requirements.txt
-└── tracker.db                  wird beim Import angelegt, nicht im Repository
+└── tracker.db                      wird beim Import angelegt, nicht im Repository
 ```
 
 ### Die fünf Seiten
