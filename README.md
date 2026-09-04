@@ -145,8 +145,15 @@ ernaehrungstracker/
 **Bundeslebensmittelschlüssel 4.0 (2025)** — herausgegeben vom Max Rubner-Institut,
 Bundesforschungsinstitut für Ernährung und Lebensmittel. Der BLS ist kostenfrei und
 lizenzfrei nutzbar. Bezug über die offizielle Seite des Instituts (blsdb.de). Übernommen
-werden acht Nährstoffe je Lebensmittel: Energie, Protein, Fett, gesättigte Fettsäuren,
-Kohlenhydrate, Zucker, Lactose und Salz.
+werden 35 Nährstoffe je Lebensmittel: Energie, Protein, Fett, gesättigte Fettsäuren,
+Kohlenhydrate, Zucker, Lactose und Salz, dazu 13 Vitamine, sechs Mengenelemente (Natrium,
+Chlorid, Kalium, Calcium, Magnesium, Phosphor) und acht Spurenelemente (Eisen, Zink,
+Iodid, Kupfer, Mangan, Fluorid, Chrom, Molybdän).
+
+Bei Vitaminen wird nur der Summenparameter übernommen, nicht zusätzlich seine
+Einzelkomponenten — sonst entstünde beim Addieren eine Doppelzählung. Die Abdeckung ist
+je Nährstoff unterschiedlich: Energie liegt bei 100 Prozent, Vitamin A bei 99,9, Molybdän
+bei 81,1. Fehlende Werte erzeugen keine Zeile und damit keine 0.
 
 **Compendium of Physical Activities, 2024 Adult Compendium** — Herrmann SD, Willis EA,
 Ainsworth BE et al., *Journal of Sport and Health Science*, 2024, https://pacompendium.com.
@@ -196,7 +203,9 @@ Offen:
 - Auswertung der Unverträglichkeiten in der Mahlzeitenansicht
 - Eigene Lebensmittel (`herkunft = 'eigen'`) lassen sich noch nicht über die Oberfläche
   anlegen
-- Salz und gesättigte Fettsäuren werden importiert, aber noch nirgends angezeigt
+- Angezeigt werden bisher fünf Nährstoffe (Energie, Eiweiß, Fett, Kohlenhydrate, Zucker);
+  Salz, gesättigte Fettsäuren, Lactose sowie die Vitamine und Mineralstoffe liegen in der
+  Datenbank, warten aber auf den Vergleich mit Referenzwerten
 - CSV-Export (vorgesehen als UTF-8 mit BOM)
 
 Bewusst nicht vorgesehen sind Sätze und Wiederholungen im Training, Bilderkennung von

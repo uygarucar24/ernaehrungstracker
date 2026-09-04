@@ -75,8 +75,24 @@ Mahlzeiten nachvollziehbar bleiben. Die Suche zeigt nur nicht archivierte Eintr�
 | bls_spalte | TEXT | Code aus der Komponenten-Legende, z. B. ENERCC |
 | name | TEXT | |
 | einheit | TEXT | führend für das gesamte System |
+| gruppe | TEXT | energie / makronaehrstoff / fett / kohlenhydrat / vitamin / mineralstoff / spurenelement |
 | gruppe | TEXT | |
 | uebergeordnet_id | INTEGER NULL FK | verhindert doppeltes Summieren |
+
+35 Einträge: Energie, sechs Makronährstoffe plus Salz, 13 Vitamine, sechs Mengenelemente
+und acht Spurenelemente. Die Spaltennummern der Quelle stehen in
+`importe/import_bls.py`, dort werden sie beim Import gegen die Überschrift geprüft.
+
+Bei den Vitaminen wird **ausschließlich der Summenparameter** übernommen, nie zusätzlich
+seine Einzelkomponenten: `VITA` statt Retinol und Carotinoiden, `VITD` statt Ergo- und
+Cholecalciferol, `VITK` statt K1 und K2, `FOL` statt Folat und Folsäure, `NIAEQ` statt
+Niacin und Tryptophananteil. Beides gemeinsam zu importieren und später zu addieren wäre
+eine Doppelzählung. Weil die Komponenten fehlen, steht bei diesen fünf **kein**
+`uebergeordnet_id`.
+
+Hierarchie: `FASAT` → `FAT`, `SUGAR` → `CHO`, `LACS` → `SUGAR`, `NACL` → `NA`. Salz wird
+im BLS als Natrium mal 2,5 gerechnet, deshalb dürfen `NACL` und `NA` nicht gemeinsam in
+eine Summe eingehen.
 
 ### naehrwert
 | Spalte | Typ | Hinweis |

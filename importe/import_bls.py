@@ -44,7 +44,43 @@ NAEHRSTOFFE = [
     (5, "CHO", "Kohlenhydrate", "g", "makronaehrstoff", None, 19, 20),
     (6, "SUGAR", "Zucker", "g", "kohlenhydrat", "CHO", 220, 221),
     (7, "LACS", "Lactose", "g", "kohlenhydrat", "SUGAR", 217, 218),
-    (8, "NACL", "Salz", "g", "mineralstoff", None, 121, 122),
+    # Salz wird im BLS als Natrium mal 2,5 berechnet. NA ist damit uebergeordnet,
+    # sonst gingen beide gemeinsam in eine Summe ein.
+    (8, "NACL", "Salz", "g", "mineralstoff", "NA", 121, 122),
+    # Vitamine. Es werden ausschliesslich die Summenparameter uebernommen, nicht
+    # ihre Einzelkomponenten: VITA statt Retinol und Carotinoiden, VITD statt
+    # Ergo- und Cholecalciferol, VITK statt K1 und K2, FOL statt Folat und
+    # Folsaeure, NIAEQ statt Niacin und Tryptophananteil. Deshalb steht bei
+    # diesen fuenf kein uebergeordnet_id: ihre Komponenten fehlen in der Tabelle.
+    (9, "VITA", "Vitamin A, Retinol-Äquivalent", "µg", "vitamin", None, 34, 35),
+    (10, "VITD", "Vitamin D", "µg", "vitamin", None, 49, 50),
+    (11, "VITE", "Vitamin E", "mg", "vitamin", None, 58, 59),
+    (12, "VITK", "Vitamin K", "µg", "vitamin", None, 76, 77),
+    (13, "THIA", "Vitamin B1", "mg", "vitamin", None, 85, 86),
+    (14, "RIBF", "Vitamin B2", "mg", "vitamin", None, 88, 89),
+    (15, "NIAEQ", "Niacin-Äquivalent", "mg", "vitamin", None, 91, 92),
+    (16, "PANTAC", "Pantothensäure", "mg", "vitamin", None, 97, 98),
+    (17, "VITB6", "Vitamin B6", "µg", "vitamin", None, 100, 101),
+    (18, "BIOT", "Biotin", "µg", "vitamin", None, 103, 104),
+    (19, "FOL", "Folat-Äquivalent", "µg", "vitamin", None, 106, 107),
+    (20, "VITB12", "Vitamin B12", "µg", "vitamin", None, 115, 116),
+    (21, "VITC", "Vitamin C", "mg", "vitamin", None, 118, 119),
+    # Mengenelemente
+    (22, "NA", "Natrium", "mg", "mineralstoff", None, 124, 125),
+    (23, "CLD", "Chlorid", "mg", "mineralstoff", None, 127, 128),
+    (24, "K", "Kalium", "mg", "mineralstoff", None, 130, 131),
+    (25, "CA", "Calcium", "mg", "mineralstoff", None, 133, 134),
+    (26, "MG", "Magnesium", "mg", "mineralstoff", None, 136, 137),
+    (27, "P", "Phosphor", "mg", "mineralstoff", None, 139, 140),
+    # Spurenelemente
+    (28, "FE", "Eisen", "mg", "spurenelement", None, 145, 146),
+    (29, "ZN", "Zink", "mg", "spurenelement", None, 148, 149),
+    (30, "ID", "Iodid", "µg", "spurenelement", None, 151, 152),
+    (31, "CU", "Kupfer", "µg", "spurenelement", None, 154, 155),
+    (32, "MN", "Mangan", "µg", "spurenelement", None, 157, 158),
+    (33, "FD", "Fluorid", "µg", "spurenelement", None, 160, 161),
+    (34, "CR", "Chrom", "µg", "spurenelement", None, 163, 164),
+    (35, "MO", "Molybdän", "µg", "spurenelement", None, 166, 167),
 ]
 
 # Textmarker, die "kein Wert" bedeuten. Alles mit "<" wird gesondert behandelt.
@@ -203,13 +239,26 @@ def entferne_naehrwerte(verbindung, kennungen):
 
 
 def schreibe_naehrstoffe(verbindung):
+    """Legt die Naehrstoffe an. Die Verweise folgen in einem zweiten Durchgang.
+
+    Ein uebergeordneter Naehrstoff kann eine hoehere Kennung haben als sein
+    Kind (NACL verweist auf NA). Erst alle Zeilen schreiben, dann die Verweise
+    setzen, damit die Reihenfolge in der Liste keine Rolle spielt.
+    """
     nach_code = {code: nid for nid, code, *_ in NAEHRSTOFFE}
-    for nid, code, name, einheit, gruppe, uebergeordnet, _, _ in NAEHRSTOFFE:
+    for nid, code, name, einheit, gruppe, _, _, _ in NAEHRSTOFFE:
         verbindung.execute(
             "INSERT OR REPLACE INTO naehrstoff "
             "(naehrstoff_id, bls_spalte, name, einheit, gruppe, uebergeordnet_id) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (nid, code, name, einheit, gruppe, nach_code.get(uebergeordnet)),
+            "VALUES (?, ?, ?, ?, ?, NULL)",
+            (nid, code, name, einheit, gruppe),
+        )
+    for nid, code, _, _, _, uebergeordnet, _, _ in NAEHRSTOFFE:
+        if uebergeordnet is None:
+            continue
+        verbindung.execute(
+            "UPDATE naehrstoff SET uebergeordnet_id = ? WHERE naehrstoff_id = ?",
+            (nach_code[uebergeordnet], nid),
         )
     return nach_code
 
@@ -369,7 +418,7 @@ def bericht(
         print(f"  Ohne Bezeichnung (Schluessel eingesetzt): {ohne_bezeichnung}")
 
     print()
-    kopf = f"  {'Naehrstoff':<28}{'Code':<10}{'mit Wert':>10}{'uebersprungen':>15}   Gruende"
+    kopf = f"  {'Naehrstoff':<36}{'Code':<10}{'mit Wert':>10}{'uebersprungen':>15}   Gruende"
     print(kopf)
     print("  " + "-" * (len(kopf) - 2))
     for _, code, name, einheit, _, _, _, _ in NAEHRSTOFFE:
@@ -377,7 +426,7 @@ def bericht(
             f"{grund_text(g)}: {n}" for g, n in sorted(gruende[code].items())
         )
         print(
-            f"  {name + ' [' + einheit + ']':<28}{code:<10}"
+            f"  {name + ' [' + einheit + ']':<36}{code:<10}"
             f"{mit_wert[code]:>10}{uebersprungen[code]:>15}   {aufschluesselung or '-'}"
         )
 
