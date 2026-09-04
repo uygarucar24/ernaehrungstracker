@@ -144,6 +144,53 @@ def kalorienziel_kcal(bedarf_kcal: float, aenderung_kg_woche: float) -> float:
     return bedarf_kcal + aenderung_kg_woche * KCAL_JE_KG / 7
 
 
+# Einstufung der Zufuhr gegenüber dem Referenzwert. Die Anwendung spricht
+# ausschließlich von Abweichungen vom Referenzwert, nie von Mangel oder
+# Versorgung, und gibt keine Ernährungsempfehlung.
+UNTERHALB = "unterhalb"
+IM_BEREICH = "im_bereich"
+OBERHALB = "oberhalb"
+KEINE_AUSSAGE = "keine_aussage"
+
+EINSTUFUNG_ANZEIGE = {
+    UNTERHALB: "unterhalb des Referenzwerts",
+    IM_BEREICH: "im Bereich",
+    OBERHALB: "oberhalb der Obergrenze",
+    KEINE_AUSSAGE: "keine Aussage möglich",
+}
+
+
+def einstufung(
+    zufuhr: float | None,
+    referenz: float | None,
+    obergrenze: float | None,
+    abdeckung: int,
+) -> str:
+    """Vergleicht die Zufuhr mit dem Referenzwert.
+
+    Ohne einen einzigen bekannten Wert (Abdeckung null) oder ohne Referenzwert
+    ist keine Aussage möglich. Ist nur eine Obergrenze hinterlegt, entfällt die
+    Einstufung "unterhalb": ohne Referenzwert gibt es keine Untergrenze.
+    """
+    if abdeckung <= 0 or zufuhr is None or (referenz is None and obergrenze is None):
+        return KEINE_AUSSAGE
+    if obergrenze is not None and zufuhr > obergrenze:
+        return OBERHALB
+    if referenz is not None and zufuhr < referenz:
+        return UNTERHALB
+    return IM_BEREICH
+
+
+def referenz_je_gewicht(referenz: float | None, bezug: str, gewicht_kg: float | None):
+    """Rechnet einen Referenzwert mit Bezug je_kg auf das Gewicht um.
+
+    Ohne bekanntes Gewicht bleibt der Wert unbestimmt, es wird nichts geschätzt.
+    """
+    if referenz is None or bezug != "je_kg":
+        return referenz
+    return None if gewicht_kg is None else referenz * gewicht_kg
+
+
 def naehrwertsummen(
     positionen: list[tuple[int, float]],
     werte: dict[tuple[int, str], float],

@@ -365,6 +365,64 @@ def mahlzeit_positionen(profil_id: int, datum: date, tagesabschnitt: str) -> lis
             return []  # lebensmittel gibt es noch nicht, import_bls.py fehlt
 
 
+def referenzwerte(geschlecht: str, alter_jahre: int) -> list[sqlite3.Row]:
+    """Referenzwerte der Altersgruppe, in die das Alter fällt.
+
+    Untergrenze einschließlich, Obergrenze ausschließlich. Passt keine Gruppe,
+    ist die Liste leer; es wird nicht auf die nächstgelegene ausgewichen.
+    """
+    with verbindung() as con:
+        try:
+            return con.execute(
+                "SELECT r.wert, r.obergrenze, r.art, r.bezug, r.bemerkung, r.fussnoten, "
+                "n.naehrstoff_id, n.bls_spalte, n.name, n.einheit, n.gruppe "
+                "FROM referenzwert r JOIN naehrstoff n USING(naehrstoff_id) "
+                "WHERE r.geschlecht = ? AND ? >= r.alter_von_jahre AND ? < r.alter_bis_jahre "
+                "ORDER BY n.naehrstoff_id",
+                (geschlecht, alter_jahre, alter_jahre),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []  # referenzwert gibt es noch nicht, import_referenzwerte.py fehlt
+
+
+def aufnahme_je_tag(profil_id: int, von: date, bis: date) -> dict[str, dict]:
+    """Zufuhr je Tag und Nährstoff im Zeitraum, einschließlich beider Ränder.
+
+    Rückgabe je Datum: Anzahl der Positionen und je BLS-Code die Summe sowie
+    die Zahl der Positionen mit bekanntem Wert. Tage ohne Mahlzeit fehlen ganz;
+    sie sind unbekannt, nicht null.
+    """
+    grenzen = (profil_id, von.isoformat(), bis.isoformat())
+    with verbindung() as con:
+        try:
+            positionen = con.execute(
+                "SELECT m.datum, COUNT(*) AS anzahl FROM mahlzeit m "
+                "JOIN mahlzeit_position p ON p.mahlzeit_id = m.mahlzeit_id "
+                "WHERE m.profil_id = ? AND m.datum BETWEEN ? AND ? GROUP BY m.datum",
+                grenzen,
+            ).fetchall()
+            summen = con.execute(
+                "SELECT m.datum, n.bls_spalte, "
+                "SUM(w.wert_je_100g * p.menge_g / ?) AS summe, COUNT(*) AS mit_wert "
+                "FROM mahlzeit m JOIN mahlzeit_position p ON p.mahlzeit_id = m.mahlzeit_id "
+                "JOIN naehrwert w ON w.lebensmittel_id = p.lebensmittel_id "
+                "JOIN naehrstoff n ON n.naehrstoff_id = w.naehrstoff_id "
+                "WHERE m.profil_id = ? AND m.datum BETWEEN ? AND ? "
+                "GROUP BY m.datum, n.bls_spalte",
+                (BEZUGSMENGE_G, *grenzen),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return {}  # naehrwert oder lebensmittel fehlen, import_bls.py fehlt
+
+    je_tag = {
+        zeile["datum"]: {"positionen": zeile["anzahl"], "werte": {}} for zeile in positionen
+    }
+    for zeile in summen:
+        eintrag = je_tag.setdefault(zeile["datum"], {"positionen": 0, "werte": {}})
+        eintrag["werte"][zeile["bls_spalte"]] = (zeile["summe"], zeile["mit_wert"])
+    return je_tag
+
+
 def mahlzeiten_am_tag(profil_id: int, datum: date) -> list[sqlite3.Row]:
     """Alle Positionen aller Mahlzeiten eines Tages, mit Tagesabschnitt."""
     with verbindung() as con:

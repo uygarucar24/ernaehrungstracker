@@ -6,7 +6,7 @@ nicht ersatzweise gegen den Grundumsatz oder einen Durchschnitt gerechnet.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import streamlit as st
 
@@ -15,6 +15,19 @@ from src.seiten.mahlzeiten import ABSCHNITT_ANZEIGE, ANZEIGE_NAEHRSTOFFE, CODES
 
 ENERGIE = "ENERCC"
 MAKROS = tuple(code for code, _ in ANZEIGE_NAEHRSTOFFE if code != ENERGIE)
+
+# Reihenfolge und Beschriftung der Nährstoffgruppen im Vergleich.
+GRUPPEN_ANZEIGE = (
+    ("makronaehrstoff", "Makronährstoffe"),
+    ("vitamin", "Vitamine"),
+    ("mineralstoff", "Mineralstoffe"),
+    ("spurenelement", "Spurenelemente"),
+)
+
+# Anteile am Energiegehalt werden vorerst nicht verglichen.
+NICHT_VERGLEICHEN = ("prozent_energie",)
+
+WOCHE_TAGE = 7
 
 
 def _kcal(wert: float) -> str:
@@ -255,6 +268,189 @@ def _makros(aufnahme: dict) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Vergleich mit den Referenzwerten
+# --------------------------------------------------------------------------- #
+def _zahl(wert: float | None, einheit: str) -> str:
+    if wert is None:
+        return "–"
+    stellen = 0 if abs(wert) >= 100 else (1 if abs(wert) >= 10 else 2)
+    return f"{wert:.{stellen}f} {einheit}"
+
+
+def _referenztext(referenz: float | None, obergrenze: float | None, einheit: str) -> str:
+    if referenz is not None and obergrenze is not None:
+        return f"{_zahl(referenz, '')}bis {_zahl(obergrenze, einheit)}"
+    if referenz is not None:
+        return _zahl(referenz, einheit)
+    if obergrenze is not None:
+        return f"höchstens {_zahl(obergrenze, einheit)}"
+    return "–"
+
+
+def _vergleichszeilen(referenzen: list, werte: dict, positionen: int, gewicht_kg: float | None):
+    """Baut je Nährstoff eine Zeile aus Zufuhr, Referenzwert und Einstufung."""
+    zeilen = []
+    for referenz in referenzen:
+        if referenz["bezug"] in NICHT_VERGLEICHEN:
+            continue
+        summe, mit_wert = werte.get(referenz["bls_spalte"], (None, 0))
+        sollwert = berechnung.referenz_je_gewicht(
+            referenz["wert"], referenz["bezug"], gewicht_kg
+        )
+        obergrenze = berechnung.referenz_je_gewicht(
+            referenz["obergrenze"], referenz["bezug"], gewicht_kg
+        )
+        zeilen.append(
+            {
+                "gruppe": referenz["gruppe"],
+                "name": referenz["name"],
+                "einheit": referenz["einheit"],
+                "zufuhr": summe,
+                "abdeckung": mit_wert,
+                "positionen": positionen,
+                "referenz": sollwert,
+                "obergrenze": obergrenze,
+                "art": referenz["art"],
+                "bezug": referenz["bezug"],
+                "einstufung": berechnung.einstufung(summe, sollwert, obergrenze, mit_wert),
+            }
+        )
+    return zeilen
+
+
+def _vergleich(
+    profil_id: int, datum: date, eintrag, aufnahme: dict, referenzen: list, alter: int
+) -> None:
+    st.subheader("Nährstoffe im Vergleich mit den Referenzwerten")
+
+    if not referenzen:
+        st.info(
+            f"Für die Altersgruppe dieses Profils ({alter} Jahre) liegen keine "
+            "Referenzwerte vor. Es wird nicht auf die nächstgelegene Altersgruppe "
+            "ausgewichen, deshalb entfällt der Vergleich."
+        )
+        return
+
+    if not aufnahme["positionen"]:
+        st.info("Für diesen Tag ist keine Mahlzeit erfasst, deshalb kein Vergleich.")
+        return
+
+    gewicht = datenbank.gewicht_bis(profil_id, datum)
+    gewicht_kg = gewicht["gewicht_kg"] if gewicht else None
+
+    codes = tuple(zeile["bls_spalte"] for zeile in referenzen)
+    werte_roh = datenbank.naehrwerte(
+        [p["lebensmittel_id"] for p in aufnahme["positionen"]], codes
+    )
+    summen, abdeckung = berechnung.naehrwertsummen(
+        [(p["lebensmittel_id"], p["menge_g"]) for p in aufnahme["positionen"]],
+        werte_roh,
+        codes,
+        datenbank.BEZUGSMENGE_G,
+    )
+    werte = {code: (summen[code], abdeckung[code]) for code in codes}
+    zeilen = _vergleichszeilen(referenzen, werte, len(aufnahme["positionen"]), gewicht_kg)
+
+    st.caption(
+        f"Altersgruppe {alter} Jahre, {'männlich' if eintrag['geschlecht'] == 'm' else 'weiblich'}. "
+        + (
+            f"Werte je Kilogramm Körpergewicht sind mit {gewicht_kg:.1f} kg gerechnet."
+            if gewicht_kg
+            else "Für Werte je Kilogramm Körpergewicht fehlt das Gewicht."
+        )
+    )
+
+    breiten = [2.6, 1.5, 1.7, 2.2, 1.5, 1.3]
+    for schluessel, ueberschrift in GRUPPEN_ANZEIGE:
+        gruppe = [z for z in zeilen if z["gruppe"] == schluessel]
+        if not gruppe:
+            continue
+        st.markdown(f"**{ueberschrift}**")
+        kopf = st.columns(breiten)
+        for spalte, text in zip(
+            kopf, ("Nährstoff", "Zufuhr", "Referenzwert", "Einstufung", "Art", "Abdeckung")
+        ):
+            spalte.caption(text)
+        for zeile in gruppe:
+            spalten = st.columns(breiten)
+            name = zeile["name"]
+            if zeile["bezug"] == "je_kg":
+                name += " (je kg)"
+            spalten[0].write(name)
+            spalten[1].write(
+                _zahl(zeile["zufuhr"], zeile["einheit"]) if zeile["abdeckung"] else "unbekannt"
+            )
+            spalten[2].write(_referenztext(zeile["referenz"], zeile["obergrenze"], zeile["einheit"]))
+            spalten[3].write(berechnung.EINSTUFUNG_ANZEIGE[zeile["einstufung"]])
+            spalten[4].write(zeile["art"] or "–")
+            spalten[5].write(f"{zeile['abdeckung']} von {zeile['positionen']}")
+
+    st.caption(
+        "Referenzwerte gelten für gesunde Personengruppen und sind so bemessen, dass sie "
+        "den Bedarf nahezu aller Personen dieser Gruppe decken. Eine Unterschreitung an "
+        "einzelnen Tagen erlaubt deshalb keine Aussage über den tatsächlichen "
+        "Nährstoffstatus. Nährstoffe mit Bezug auf den Energieanteil sind nicht enthalten."
+    )
+
+
+def _wochenauswertung(profil_id: int, datum: date, referenzen: list) -> None:
+    st.subheader(f"Letzte {WOCHE_TAGE} Tage")
+
+    von = datum - timedelta(days=WOCHE_TAGE - 1)
+    je_tag = datenbank.aufnahme_je_tag(profil_id, von, datum)
+    if not je_tag:
+        st.info(
+            f"Zwischen dem {von.strftime('%d.%m.%Y')} und dem {datum.strftime('%d.%m.%Y')} "
+            "ist keine Mahlzeit erfasst."
+        )
+        return
+
+    gewicht = datenbank.gewicht_bis(profil_id, datum)
+    gewicht_kg = gewicht["gewicht_kg"] if gewicht else None
+
+    zusammen = []
+    for referenz in referenzen:
+        if referenz["bezug"] in NICHT_VERGLEICHEN:
+            continue
+        sollwert = berechnung.referenz_je_gewicht(
+            referenz["wert"], referenz["bezug"], gewicht_kg
+        )
+        obergrenze = berechnung.referenz_je_gewicht(
+            referenz["obergrenze"], referenz["bezug"], gewicht_kg
+        )
+        tage_mit_aussage = 0
+        tage_unterhalb = 0
+        for eintrag in je_tag.values():
+            summe, mit_wert = eintrag["werte"].get(referenz["bls_spalte"], (None, 0))
+            urteil = berechnung.einstufung(summe, sollwert, obergrenze, mit_wert)
+            if urteil == berechnung.KEINE_AUSSAGE:
+                continue
+            tage_mit_aussage += 1
+            if urteil == berechnung.UNTERHALB:
+                tage_unterhalb += 1
+        if tage_mit_aussage:
+            zusammen.append((referenz["name"], tage_unterhalb, tage_mit_aussage))
+
+    if not zusammen:
+        st.caption("Für keinen Nährstoff liegen im Zeitraum auswertbare Tage vor.")
+        return
+
+    st.caption(
+        f"Erfasste Tage im Zeitraum: {len(je_tag)}. Tage ohne erfasste Mahlzeit zählen "
+        "nicht mit und gelten nicht als Unterschreitung."
+    )
+    breiten = [3.0, 2.6, 2.4]
+    kopf = st.columns(breiten)
+    for spalte, text in zip(kopf, ("Nährstoff", "Tage unterhalb", "beruht auf")):
+        spalte.caption(text)
+    for name, unterhalb, mit_aussage in zusammen:
+        zeile = st.columns(breiten)
+        zeile[0].write(name)
+        zeile[1].write(f"{unterhalb} von {mit_aussage}")
+        zeile[2].write(f"{mit_aussage} erfassten Tagen")
+
+
+# --------------------------------------------------------------------------- #
 # Seite
 # --------------------------------------------------------------------------- #
 def seite() -> None:
@@ -287,3 +483,18 @@ def seite() -> None:
     _mahlzeiten(aufnahme)
     st.divider()
     _makros(aufnahme)
+    st.divider()
+
+    # Der Vergleich gilt für beide Profiltypen, sofern die Altersgruppe
+    # hinterlegt ist. Kalorienbilanz und Zielwerte bleiben davon unberührt.
+    if eintrag is not None:
+        alter = berechnung.alter_in_jahren(
+            date.fromisoformat(str(eintrag["geburtsdatum"])), datum
+        )
+        referenzen = datenbank.referenzwerte(eintrag["geschlecht"], alter)
+        _vergleich(profil_id, datum, eintrag, aufnahme, referenzen, alter)
+        # Die Wochenauswertung haengt nicht am gewaehlten Tag: sie ist auch dann
+        # sinnvoll, wenn fuer diesen Tag nichts erfasst ist.
+        if referenzen:
+            st.divider()
+            _wochenauswertung(profil_id, datum, referenzen)
