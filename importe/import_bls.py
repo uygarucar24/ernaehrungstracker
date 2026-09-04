@@ -53,6 +53,10 @@ NAEHRSTOFFE = [
     # Folsaeure, NIAEQ statt Niacin und Tryptophananteil. Deshalb steht bei
     # diesen fuenf kein uebergeordnet_id: ihre Komponenten fehlen in der Tabelle.
     (9, "VITA", "Vitamin A, Retinol-Äquivalent", "µg", "vitamin", None, 34, 35),
+    # VITAA ist nach einer anderen Formel gerechnet als VITA. Die DGE-Referenzwerte
+    # beziehen sich auf RAE, deshalb wird beides gefuehrt. Kein uebergeordnet_id:
+    # die beiden sind zwei Rechenwege fuer dasselbe Vitamin, nicht Teil und Ganzes.
+    (36, "VITAA", "Vitamin A, Retinol-Aktivitäts-Äquivalent", "µg", "vitamin", None, 37, 38),
     (10, "VITD", "Vitamin D", "µg", "vitamin", None, 49, 50),
     (11, "VITE", "Vitamin E", "mg", "vitamin", None, 58, 59),
     (12, "VITK", "Vitamin K", "µg", "vitamin", None, 76, 77),
@@ -418,7 +422,7 @@ def bericht(
         print(f"  Ohne Bezeichnung (Schluessel eingesetzt): {ohne_bezeichnung}")
 
     print()
-    kopf = f"  {'Naehrstoff':<36}{'Code':<10}{'mit Wert':>10}{'uebersprungen':>15}   Gruende"
+    kopf = f"  {'Naehrstoff':<46}{'Code':<10}{'mit Wert':>10}{'uebersprungen':>15}   Gruende"
     print(kopf)
     print("  " + "-" * (len(kopf) - 2))
     for _, code, name, einheit, _, _, _, _ in NAEHRSTOFFE:
@@ -426,7 +430,7 @@ def bericht(
             f"{grund_text(g)}: {n}" for g, n in sorted(gruende[code].items())
         )
         print(
-            f"  {name + ' [' + einheit + ']':<36}{code:<10}"
+            f"  {name + ' [' + einheit + ']':<46}{code:<10}"
             f"{mit_wert[code]:>10}{uebersprungen[code]:>15}   {aufschluesselung or '-'}"
         )
 

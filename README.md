@@ -82,6 +82,10 @@ python importe/import_sportarten.py
 python importe/import_met_grundwerte.py
 ```
 
+```bash
+python importe/import_referenzwerte.py
+```
+
 Der erste Lauf legt `tracker.db` an und füllt sie mit 7140 Lebensmitteln und rund 57 000
 Nährwerten; das dauert etwa eine Minute. Die beiden anderen Skripte lesen
 `daten/sportarten.csv` und `daten/met_grundwerte.csv`, die im Repository liegen.
@@ -118,10 +122,12 @@ ernaehrungstracker/
 ├── importe/                        einmalige Skripte, nicht Teil der Anwendung
 │   ├── import_bls.py               Bundeslebensmittelschlüssel
 │   ├── import_sportarten.py        Sportartenkatalog
-│   └── import_met_grundwerte.py    MET-Grundwerte
+│   ├── import_met_grundwerte.py    MET-Grundwerte
+│   └── import_referenzwerte.py     DGE/ÖGE-Referenzwerte
 ├── daten/                          Eingangsdaten, im Repository
 │   ├── sportarten.csv              25 Sportarten mit Code, MET-Wert, Quelle, Kategorie
-│   └── met_grundwerte.csv          MET-Werte für Schlaf, Arbeit und Restzeit
+│   ├── met_grundwerte.csv          MET-Werte für Schlaf, Arbeit und Restzeit
+│   └── DGE-Referenzwerte.xlsx      Referenzwerte und Fußnoten
 ├── quellen/                        BLS-Quelldateien, nicht im Repository
 ├── .claude/launch.json             Startkonfiguration für die Vorschau
 ├── CLAUDE.md                       verbindliche Projektregeln und Datenmodell
@@ -154,6 +160,13 @@ Bei Vitaminen wird nur der Summenparameter übernommen, nicht zusätzlich seine
 Einzelkomponenten — sonst entstünde beim Addieren eine Doppelzählung. Die Abdeckung ist
 je Nährstoff unterschiedlich: Energie liegt bei 100 Prozent, Vitamin A bei 99,9, Molybdän
 bei 81,1. Fehlende Werte erzeugen keine Zeile und damit keine 0.
+
+**DGE/ÖGE-Referenzwerte für die Nährstoffzufuhr**, 3. Auflage, 1. Ausgabe 2025 —
+herausgegeben von der Deutschen Gesellschaft für Ernährung und der Österreichischen
+Gesellschaft für Ernährung. Übernommen werden 186 Werte für 31 Nährstoffe in drei
+Altersgruppen (4 bis unter 7, 7 bis unter 10, 25 bis unter 51 Jahre) je Geschlecht, mit
+Kategorie, Bemerkung und Fußnoten. Passt ein Profil in keine dieser Gruppen, gibt es
+keinen Referenzwert; es wird nicht auf die nächstliegende Gruppe ausgewichen.
 
 **Compendium of Physical Activities, 2024 Adult Compendium** — Herrmann SD, Willis EA,
 Ainsworth BE et al., *Journal of Sport and Health Science*, 2024, https://pacompendium.com.
@@ -198,8 +211,10 @@ Umgesetzt:
 
 Offen:
 
-- Referenzwerte (`referenzwert`) und KI-Hinweise (`ki_hinweis`) sind im Datenmodell
-  beschrieben, die Tabellen werden aber noch nicht angelegt
+- Vergleich der Aufnahme mit den Referenzwerten: die Tabelle `referenzwert` ist gefüllt,
+  in der Oberfläche wird sie noch nicht ausgewertet
+- KI-Hinweise (`ki_hinweis`) sind im Datenmodell beschrieben, die Tabelle wird noch nicht
+  angelegt
 - Auswertung der Unverträglichkeiten in der Mahlzeitenansicht
 - Eigene Lebensmittel (`herkunft = 'eigen'`) lassen sich noch nicht über die Oberfläche
   anlegen

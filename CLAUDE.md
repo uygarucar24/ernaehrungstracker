@@ -221,12 +221,34 @@ sichtbarem MET-Wert.
 | geschlecht | TEXT | |
 | alter_von_jahre | INTEGER | Untergrenze einschließlich |
 | alter_bis_jahre | INTEGER | Obergrenze ausschließlich |
-| art | TEXT | empfehlung / schaetzwert / richtwert |
-| bezug | TEXT | absolut / je_kg |
-| wert | REAL | |
-| obergrenze | REAL NULL | |
+| art | TEXT NULL | empfehlung / schaetzwert / richtwert, leer wenn die Quelle nichts angibt |
+| bezug | TEXT | absolut / je_kg / prozent_energie |
+| wert | REAL NULL | leer bei reinen Höchstmengen („max. 10") |
+| obergrenze | REAL NULL | oberer Wert eines Bereichs oder die Höchstmenge |
+| bemerkung | TEXT NULL | Bemerkungsspalte der Quelle |
+| fussnoten | TEXT NULL | Kürzel der Quelle, unverändert, siehe `fussnote` |
 | quelle | TEXT | |
 | stand | TEXT | |
+
+Befüllt aus `daten/DGE-Referenzwerte.xlsx` über `importe/import_referenzwerte.py`.
+`quelle` = „DGE/ÖGE-Referenzwerte für die Nährstoffzufuhr", `stand` = „3. Auflage,
+1. Ausgabe 2025". Eindeutig je Nährstoff, Geschlecht und Altersgruppe; ein zweiter Lauf
+aktualisiert. Nur Bezeichnungen mit Zuordnung auf einen BLS-Code werden übernommen, der
+Rest wird am Ende namentlich gemeldet. Von den drei Zinkstufen zählt die mittlere
+Phytatzufuhr, sie entspricht einer gemischten Kost.
+
+Passt ein Profil in keine der enthaltenen Altersgruppen, gibt es keinen Referenzwert.
+Nicht auf die nächstliegende Gruppe ausweichen und nichts interpolieren.
+
+**Einheiten:** Der Zahlenwert steht so in der Tabelle, wie die Quelle ihn angibt. Bei
+`CU`, `FD`, `MN` und `VITB6` rechnet die DGE in mg, der BLS in µg. Ein Vergleich mit der
+Aufnahme muss das umrechnen; der Import meldet diese Fälle bei jedem Lauf.
+
+### fussnote
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| kuerzel | TEXT PK | z. B. `v`, `x`, `y2` |
+| beschreibung | TEXT | Erläuterung aus dem zweiten Blatt der Quelle |
 
 ### tagesbedarf
 | Spalte | Typ | Hinweis |
