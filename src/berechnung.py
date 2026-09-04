@@ -191,6 +191,44 @@ def referenz_je_gewicht(referenz: float | None, bezug: str, gewicht_kg: float | 
     return None if gewicht_kg is None else referenz * gewicht_kg
 
 
+# Prüfung auf Unverträglichkeiten. Beschrieben wird ausschließlich, was im
+# Datenbestand steht; es wird nie eine Verträglichkeit zugesichert.
+ENTHALTEN = "enthalten"
+UNTER_SCHWELLE = "unter_schwelle"
+FREI_LOGISCH = "frei_logisch"
+FREI_ANDERE = "frei_andere"
+OHNE_ANGABE = "ohne_angabe"
+
+# Herkunft im BLS, die eine echte Null bedeutet: der Stoff kommt nicht vor.
+LOGISCHE_NULL = "Logische Null"
+
+
+def unvertraeglichkeit_zustand(
+    wert_je_100g: float | None, herkunft: str | None, schwelle_je_100g: float | None = None
+) -> str:
+    """Beurteilt eine Position anhand des Nährwerts und seiner Herkunft.
+
+    Ohne Zeile in naehrwert gibt es keine Angabe. Das ist ausdrücklich keine
+    Entwarnung und wird nicht wie ein Nullwert behandelt.
+
+    Ohne hinterlegte Schwelle löst jede nachgewiesene Menge einen Hinweis aus,
+    weil die individuelle Empfindlichkeit stark schwankt. Ist eine Schwelle
+    hinterlegt, gilt sie als Grenze.
+    """
+    if wert_je_100g is None:
+        return OHNE_ANGABE
+    if wert_je_100g > (schwelle_je_100g or 0):
+        return ENTHALTEN
+    if wert_je_100g > 0:
+        return UNTER_SCHWELLE
+    return FREI_LOGISCH if (herkunft or "").strip() == LOGISCHE_NULL else FREI_ANDERE
+
+
+def menge_je_portion(wert_je_100g: float, menge_g: float, bezugsmenge_g: float) -> float:
+    """Rechnet einen Wert je Bezugsmenge auf die Portion um."""
+    return wert_je_100g * menge_g / bezugsmenge_g
+
+
 def naehrwertsummen(
     positionen: list[tuple[int, float]],
     werte: dict[tuple[int, str], float],

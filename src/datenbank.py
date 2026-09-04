@@ -243,12 +243,52 @@ def letztes_gewicht(profil_id: int) -> sqlite3.Row | None:
 
 
 def unvertraeglichkeiten(profil_id: int, nur_aktive: bool = True) -> list[sqlite3.Row]:
-    bedingung = " AND aktiv = 1" if nur_aktive else ""
+    """Hinterlegte Unverträglichkeiten, mit den Stammdaten des Nährstoffs.
+
+    Der Verweis auf naehrstoff darf fehlen (Prüfweg ohne Nährstoff), deshalb
+    LEFT JOIN. Ohne die Tabelle naehrstoff bleiben die Spalten leer.
+    """
+    bedingung = " AND u.aktiv = 1" if nur_aktive else ""
     with verbindung() as con:
-        return con.execute(
-            "SELECT * FROM unvertraeglichkeit WHERE profil_id = ?" + bedingung,
-            (profil_id,),
-        ).fetchall()
+        try:
+            return con.execute(
+                "SELECT u.*, n.bls_spalte, n.name AS naehrstoff_name, n.einheit "
+                "FROM unvertraeglichkeit u "
+                "LEFT JOIN naehrstoff n ON n.naehrstoff_id = u.naehrstoff_id "
+                "WHERE u.profil_id = ?" + bedingung,
+                (profil_id,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return con.execute(
+                "SELECT * FROM unvertraeglichkeit WHERE profil_id = ?"
+                + bedingung.replace("u.", ""),
+                (profil_id,),
+            ).fetchall()
+
+
+def naehrwerte_mit_herkunft(
+    lebensmittel_ids: list[int], codes: tuple[str, ...]
+) -> dict[tuple[int, str], sqlite3.Row]:
+    """Wie naehrwerte, zusätzlich mit wert_herkunft.
+
+    Fehlt der Schlüssel, gibt es keine Zeile in naehrwert: unbekannt, nicht 0.
+    """
+    if not lebensmittel_ids or not codes:
+        return {}
+    lm_platzhalter = ",".join("?" * len(lebensmittel_ids))
+    code_platzhalter = ",".join("?" * len(codes))
+    with verbindung() as con:
+        try:
+            zeilen = con.execute(
+                "SELECT w.lebensmittel_id, n.bls_spalte, w.wert_je_100g, w.wert_herkunft "
+                "FROM naehrwert w JOIN naehrstoff n ON n.naehrstoff_id = w.naehrstoff_id "
+                f"WHERE w.lebensmittel_id IN ({lm_platzhalter}) "
+                f"AND n.bls_spalte IN ({code_platzhalter})",
+                list(lebensmittel_ids) + list(codes),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return {}
+    return {(z["lebensmittel_id"], z["bls_spalte"]): z for z in zeilen}
 
 
 def naehrstoff_id(bls_spalte: str) -> int | None:

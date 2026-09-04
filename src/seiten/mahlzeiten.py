@@ -9,7 +9,7 @@ from datetime import date
 
 import streamlit as st
 
-from src import datenbank
+from src import berechnung, datenbank
 
 ABSCHNITT_ANZEIGE = {
     "fruehstueck": "Frühstück",
@@ -108,13 +108,14 @@ def _erfassung(profil_id: int, datum: date, tagesabschnitt: str) -> None:
 # --------------------------------------------------------------------------- #
 # Anzeige der Mahlzeit
 # --------------------------------------------------------------------------- #
-def _anzeige(profil_id: int, datum: date, tagesabschnitt: str) -> None:
+def _anzeige(profil_id: int, datum: date, tagesabschnitt: str) -> list:
+    """Zeigt die Mahlzeit und gibt ihre Positionen zurück."""
     st.subheader(f"{ABSCHNITT_ANZEIGE[tagesabschnitt]} am {datum.strftime('%d.%m.%Y')}")
 
     positionen = datenbank.mahlzeit_positionen(profil_id, datum, tagesabschnitt)
     if not positionen:
         st.info("Für diesen Tagesabschnitt ist noch nichts erfasst.")
-        return
+        return []
 
     stammdaten = datenbank.naehrstoffe(CODES)
     werte = datenbank.naehrwerte([p["lebensmittel_id"] for p in positionen], CODES)
@@ -165,6 +166,111 @@ def _anzeige(profil_id: int, datum: date, tagesabschnitt: str) -> None:
             "Fehlende Nährwerte sind als unbekannt ausgewiesen und gehen nicht "
             "in die Summe ein. Die Summe deckt dann weniger Positionen ab."
         )
+    return positionen
+
+
+# --------------------------------------------------------------------------- #
+# Prüfung auf Unverträglichkeiten
+# --------------------------------------------------------------------------- #
+def _aussage(zustand: str, stoff: str, menge: float | None, einheit: str, herkunft: str | None,
+             schwelle: float | None) -> str:
+    """Formuliert die Aussage je Position. Beschreibt nur den Datenbestand."""
+    if zustand == berechnung.ENTHALTEN:
+        return f"Enthält {stoff}: {menge:.2f} {einheit}"
+    if zustand == berechnung.UNTER_SCHWELLE:
+        return (
+            f"Enthält {stoff}: {menge:.2f} {einheit}, unterhalb der hinterlegten "
+            f"Schwelle von {schwelle:g} {einheit} je 100 g"
+        )
+    if zustand == berechnung.FREI_LOGISCH:
+        return f"Enthält kein(e) {stoff}"
+    if zustand == berechnung.FREI_ANDERE:
+        return f"Enthält kein(e) {stoff} (Herkunft der Angabe: {herkunft or 'ohne Angabe'})"
+    return f"Keine Angabe zu {stoff}"
+
+
+def _unvertraeglichkeiten(profil_id: int, positionen: list) -> None:
+    """Je Position eine Aussage zu jeder hinterlegten Unverträglichkeit.
+
+    Die Prüfung läuft vollständig über den Datenbestand. Weitere Stoffe lassen
+    sich ergänzen, indem in unvertraeglichkeit ein weiterer Eintrag mit Verweis
+    auf den Nährstoff angelegt wird; hier ist nichts anzupassen.
+    """
+    eintraege = [
+        zeile
+        for zeile in datenbank.unvertraeglichkeiten(profil_id)
+        if zeile["pruefweg"] == "bls" and zeile["naehrstoff_id"] is not None
+    ]
+    if not eintraege or not positionen:
+        return
+
+    codes = tuple(
+        zeile["bls_spalte"] for zeile in eintraege if zeile["bls_spalte"] is not None
+    )
+    werte = datenbank.naehrwerte_mit_herkunft(
+        [p["lebensmittel_id"] for p in positionen], codes
+    )
+
+    st.subheader("Unverträglichkeiten")
+    breiten = [2.6, 1.0, 4.4]
+
+    for eintrag in eintraege:
+        code = eintrag["bls_spalte"]
+        if code is None:
+            continue
+        stoff = eintrag["naehrstoff_name"] or eintrag["bezeichnung"].capitalize()
+        einheit = eintrag["einheit"] or ""
+        schwelle = eintrag["schwelle_je_100g"]
+
+        st.markdown(f"**{stoff}**")
+        kopf = st.columns(breiten)
+        for spalte, text in zip(kopf, ("Lebensmittel", "Menge", "Angabe im Datenbestand")):
+            spalte.caption(text)
+
+        summe = 0.0
+        mit_wert = 0
+        ohne_angabe = 0
+        for position in positionen:
+            zeile = werte.get((position["lebensmittel_id"], code))
+            wert = zeile["wert_je_100g"] if zeile is not None else None
+            herkunft = zeile["wert_herkunft"] if zeile is not None else None
+            zustand = berechnung.unvertraeglichkeit_zustand(wert, herkunft, schwelle)
+
+            menge = None
+            if wert is not None:
+                menge = berechnung.menge_je_portion(
+                    wert, position["menge_g"], datenbank.BEZUGSMENGE_G
+                )
+                mit_wert += 1
+                summe += menge
+            if zustand == berechnung.OHNE_ANGABE:
+                ohne_angabe += 1
+
+            spalten = st.columns(breiten)
+            spalten[0].write(position["bezeichnung"])
+            spalten[1].write(f"{position['menge_g']:.0f} g")
+            text = _aussage(zustand, stoff, menge, einheit, herkunft, schwelle)
+            if zustand == berechnung.OHNE_ANGABE:
+                spalten[2].warning(text, icon="❔")
+            elif zustand in (berechnung.ENTHALTEN, berechnung.UNTER_SCHWELLE):
+                spalten[2].warning(text, icon="⚠️")
+            else:
+                spalten[2].write(text)
+
+        st.caption(
+            f"Enthaltene Menge über alle Positionen: {summe:.2f} {einheit}, "
+            f"ermittelt aus {mit_wert} von {len(positionen)} Positionen. "
+            + (
+                f"{ohne_angabe} Position(en) ohne Angabe gehen nicht in die Summe ein."
+                if ohne_angabe
+                else "Für alle Positionen liegt eine Angabe vor."
+            )
+        )
+
+    st.caption(
+        "Die Angaben stammen aus dem hinterlegten Datenbestand und beschreiben nur, "
+        "was dort steht. Maßgeblich ist die Deklaration auf der Verpackung."
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -194,4 +300,7 @@ def seite() -> None:
 
     _erfassung(profil_id, datum, tagesabschnitt)
     st.divider()
-    _anzeige(profil_id, datum, tagesabschnitt)
+    positionen = _anzeige(profil_id, datum, tagesabschnitt)
+    if positionen:
+        st.divider()
+        _unvertraeglichkeiten(profil_id, positionen)

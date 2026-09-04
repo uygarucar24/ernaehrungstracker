@@ -113,8 +113,35 @@ Keine Zeile bedeutet unbekannt. Eine Zeile mit dem Wert 0 bedeutet tatsächlich 
 | bezeichnung | TEXT | zunächst nur "laktose" |
 | pruefweg | TEXT | bls / ki_hinweis |
 | naehrstoff_id | FK NULL | bei Laktose der LACS-Nährstoff |
-| schwelle_je_100g | REAL NULL | |
+| schwelle_je_100g | REAL NULL | leer: jede nachgewiesene Menge löst einen Hinweis aus |
 | aktiv | INTEGER | |
+
+**Prüfung auf der Mahlzeitenseite.** Sie läuft vollständig über den Datenbestand, ohne KI,
+und gilt für Erwachsenen- wie Kinderprofile. Je Position und je hinterlegtem Eintrag mit
+`pruefweg = 'bls'` entsteht genau eine von vier Aussagen aus `naehrwert.wert_je_100g` und
+`wert_herkunft`:
+
+| Datenlage | Aussage |
+|---|---|
+| Wert größer null | „Enthält …" mit der auf die Portion umgerechneten Menge |
+| Wert null, Herkunft `Logische Null` | „Enthält kein(e) …" |
+| Wert null, andere Herkunft | „Enthält kein(e) …" mit Angabe der Herkunft |
+| keine Zeile in `naehrwert` | „Keine Angabe zu …" |
+
+Der vierte Fall ist **keine Entwarnung**: er wird sichtbar anders dargestellt und nie als
+„enthält kein(e)" ausgegeben. Ist `schwelle_je_100g` gesetzt, gilt sie als Grenze, sonst
+löst jeder Wert über null einen Hinweis aus, weil die individuelle Empfindlichkeit stark
+schwankt.
+
+Auf Mahlzeitenebene wird die enthaltene Menge summiert und genannt, auf wie vielen
+Positionen die Summe beruht; Positionen ohne Angabe gehen nicht als null ein. Die
+Wortwahl beschreibt ausschließlich den Datenbestand: kein „unbedenklich", „verträglich"
+oder „geeignet", dazu der Hinweis, dass die Verpackungsdeklaration maßgeblich bleibt.
+
+Weitere Stoffe brauchen keine Codeänderung: Ein zusätzlicher Eintrag in
+`unvertraeglichkeit` mit Verweis auf den Nährstoff genügt. Vorgesehen sind Fructose
+(`FRUS`) und die Zuckeralkohole (`SORTL`, `MANTL`, `XYLTL`); sie werden derzeit nicht
+importiert.
 
 ### gewicht
 | Spalte | Typ |
