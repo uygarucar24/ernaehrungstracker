@@ -6,6 +6,7 @@ nicht ersatzweise gegen den Grundumsatz oder einen Durchschnitt gerechnet.
 """
 from __future__ import annotations
 
+from collections import Counter
 from datetime import date, timedelta
 
 import streamlit as st
@@ -16,13 +17,9 @@ from src.seiten.mahlzeiten import ABSCHNITT_ANZEIGE, ANZEIGE_NAEHRSTOFFE, CODES
 ENERGIE = "ENERCC"
 MAKROS = tuple(code for code, _ in ANZEIGE_NAEHRSTOFFE if code != ENERGIE)
 
-# Reihenfolge und Beschriftung der Nährstoffgruppen im Vergleich.
-GRUPPEN_ANZEIGE = (
-    ("makronaehrstoff", "Makronährstoffe"),
-    ("vitamin", "Vitamine"),
-    ("mineralstoff", "Mineralstoffe"),
-    ("spurenelement", "Spurenelemente"),
-)
+# Fettlösliche Vitamine. Die übrigen sind wasserlöslich. Die Unterteilung steht
+# hier und nicht in naehrstoff.gruppe, weil sie nur der Anzeige dient.
+FETTLOESLICHE_VITAMINE = ("VITA", "VITAA", "VITD", "VITE", "VITK")
 
 # Anteile am Energiegehalt werden vorerst nicht verglichen.
 NICHT_VERGLEICHEN = ("prozent_energie",)
@@ -303,6 +300,7 @@ def _vergleichszeilen(referenzen: list, werte: dict, positionen: int, gewicht_kg
         zeilen.append(
             {
                 "gruppe": referenz["gruppe"],
+                "code": referenz["bls_spalte"],
                 "name": referenz["name"],
                 "einheit": referenz["einheit"],
                 "zufuhr": summe,
@@ -316,6 +314,71 @@ def _vergleichszeilen(referenzen: list, werte: dict, positionen: int, gewicht_kg
             }
         )
     return zeilen
+
+
+def _abschnitte(zeilen: list) -> list[tuple[str, list[tuple[str, list]]]]:
+    """Teilt die Nährstoffe in aufklappbare Abschnitte mit Unterabschnitten.
+
+    Energieliefernde Nährstoffe, Vitamine nach Löslichkeit, Mineralstoffe nach
+    Mengen- und Spurenelementen.
+    """
+    vitamine = [z for z in zeilen if z["gruppe"] == "vitamin"]
+    return [
+        (
+            "Energieliefernde Nährstoffe",
+            [("", [z for z in zeilen if z["gruppe"] == "makronaehrstoff"])],
+        ),
+        (
+            "Vitamine",
+            [
+                ("Fettlöslich", [z for z in vitamine if z["code"] in FETTLOESLICHE_VITAMINE]),
+                ("Wasserlöslich", [z for z in vitamine if z["code"] not in FETTLOESLICHE_VITAMINE]),
+            ],
+        ),
+        (
+            "Mineralstoffe",
+            [
+                ("Mengenelemente", [z for z in zeilen if z["gruppe"] == "mineralstoff"]),
+                ("Spurenelemente", [z for z in zeilen if z["gruppe"] == "spurenelement"]),
+            ],
+        ),
+    ]
+
+
+def _abschnittstitel(titel: str, zeilen: list) -> str:
+    """Titel mit kurzer Übersicht, damit man ohne Aufklappen etwas sieht."""
+    zaehler = Counter(z["einstufung"] for z in zeilen)
+    teile = []
+    for schluessel, wort in (
+        (berechnung.UNTERHALB, "unterhalb"),
+        (berechnung.OBERHALB, "oberhalb"),
+        (berechnung.KEINE_AUSSAGE, "ohne Aussage"),
+    ):
+        if zaehler[schluessel]:
+            teile.append(f"{zaehler[schluessel]} {wort}")
+    if not teile:
+        teile.append("alle im Bereich")
+    return f"{titel} ({len(zeilen)}) — " + ", ".join(teile)
+
+
+def _vergleichstabelle(zeilen: list) -> None:
+    breiten = [2.6, 1.5, 1.7, 2.2, 1.5, 1.3]
+    kopf = st.columns(breiten)
+    for spalte, text in zip(
+        kopf, ("Nährstoff", "Zufuhr", "Referenzwert", "Einstufung", "Art", "Abdeckung")
+    ):
+        spalte.caption(text)
+    for zeile in zeilen:
+        spalten = st.columns(breiten)
+        name = zeile["name"] + (" (je kg)" if zeile["bezug"] == "je_kg" else "")
+        spalten[0].write(name)
+        spalten[1].write(
+            _zahl(zeile["zufuhr"], zeile["einheit"]) if zeile["abdeckung"] else "unbekannt"
+        )
+        spalten[2].write(_referenztext(zeile["referenz"], zeile["obergrenze"], zeile["einheit"]))
+        spalten[3].write(berechnung.EINSTUFUNG_ANZEIGE[zeile["einstufung"]])
+        spalten[4].write(zeile["art"] or "–")
+        spalten[5].write(f"{zeile['abdeckung']} von {zeile['positionen']}")
 
 
 def _vergleich(
@@ -360,30 +423,17 @@ def _vergleich(
         )
     )
 
-    breiten = [2.6, 1.5, 1.7, 2.2, 1.5, 1.3]
-    for schluessel, ueberschrift in GRUPPEN_ANZEIGE:
-        gruppe = [z for z in zeilen if z["gruppe"] == schluessel]
-        if not gruppe:
+    for titel, unterabschnitte in _abschnitte(zeilen):
+        gesamt = [z for teil in unterabschnitte for z in teil[1]]
+        if not gesamt:
             continue
-        st.markdown(f"**{ueberschrift}**")
-        kopf = st.columns(breiten)
-        for spalte, text in zip(
-            kopf, ("Nährstoff", "Zufuhr", "Referenzwert", "Einstufung", "Art", "Abdeckung")
-        ):
-            spalte.caption(text)
-        for zeile in gruppe:
-            spalten = st.columns(breiten)
-            name = zeile["name"]
-            if zeile["bezug"] == "je_kg":
-                name += " (je kg)"
-            spalten[0].write(name)
-            spalten[1].write(
-                _zahl(zeile["zufuhr"], zeile["einheit"]) if zeile["abdeckung"] else "unbekannt"
-            )
-            spalten[2].write(_referenztext(zeile["referenz"], zeile["obergrenze"], zeile["einheit"]))
-            spalten[3].write(berechnung.EINSTUFUNG_ANZEIGE[zeile["einstufung"]])
-            spalten[4].write(zeile["art"] or "–")
-            spalten[5].write(f"{zeile['abdeckung']} von {zeile['positionen']}")
+        with st.expander(_abschnittstitel(titel, gesamt)):
+            for untertitel, teil in unterabschnitte:
+                if not teil:
+                    continue
+                if untertitel:
+                    st.markdown(f"**{untertitel}**")
+                _vergleichstabelle(teil)
 
     st.caption(
         "Referenzwerte gelten für gesunde Personengruppen und sind so bemessen, dass sie "
@@ -429,7 +479,15 @@ def _wochenauswertung(profil_id: int, datum: date, referenzen: list) -> None:
             if urteil == berechnung.UNTERHALB:
                 tage_unterhalb += 1
         if tage_mit_aussage:
-            zusammen.append((referenz["name"], tage_unterhalb, tage_mit_aussage))
+            zusammen.append(
+                {
+                    "gruppe": referenz["gruppe"],
+                    "code": referenz["bls_spalte"],
+                    "name": referenz["name"],
+                    "unterhalb": tage_unterhalb,
+                    "mit_aussage": tage_mit_aussage,
+                }
+            )
 
     if not zusammen:
         st.caption("Für keinen Nährstoff liegen im Zeitraum auswertbare Tage vor.")
@@ -440,14 +498,30 @@ def _wochenauswertung(profil_id: int, datum: date, referenzen: list) -> None:
         "nicht mit und gelten nicht als Unterschreitung."
     )
     breiten = [3.0, 2.6, 2.4]
-    kopf = st.columns(breiten)
-    for spalte, text in zip(kopf, ("Nährstoff", "Tage unterhalb", "beruht auf")):
-        spalte.caption(text)
-    for name, unterhalb, mit_aussage in zusammen:
-        zeile = st.columns(breiten)
-        zeile[0].write(name)
-        zeile[1].write(f"{unterhalb} von {mit_aussage}")
-        zeile[2].write(f"{mit_aussage} erfassten Tagen")
+    for titel, unterabschnitte in _abschnitte(zusammen):
+        gesamt = [z for teil in unterabschnitte for z in teil[1]]
+        if not gesamt:
+            continue
+        betroffen = sum(1 for z in gesamt if z["unterhalb"])
+        beschriftung = (
+            f"{titel} ({len(gesamt)}) — {betroffen} mit Tagen unterhalb"
+            if betroffen
+            else f"{titel} ({len(gesamt)}) — an keinem Tag unterhalb"
+        )
+        with st.expander(beschriftung):
+            for untertitel, teil in unterabschnitte:
+                if not teil:
+                    continue
+                if untertitel:
+                    st.markdown(f"**{untertitel}**")
+                kopf = st.columns(breiten)
+                for spalte, text in zip(kopf, ("Nährstoff", "Tage unterhalb", "beruht auf")):
+                    spalte.caption(text)
+                for eintrag in teil:
+                    zeile = st.columns(breiten)
+                    zeile[0].write(eintrag["name"])
+                    zeile[1].write(f"{eintrag['unterhalb']} von {eintrag['mit_aussage']}")
+                    zeile[2].write(f"{eintrag['mit_aussage']} erfassten Tagen")
 
 
 # --------------------------------------------------------------------------- #
