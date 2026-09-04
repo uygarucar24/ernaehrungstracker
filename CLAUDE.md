@@ -240,9 +240,10 @@ Phytatzufuhr, sie entspricht einer gemischten Kost.
 Passt ein Profil in keine der enthaltenen Altersgruppen, gibt es keinen Referenzwert.
 Nicht auf die nächstliegende Gruppe ausweichen und nichts interpolieren.
 
-**Einheiten:** Der Zahlenwert steht so in der Tabelle, wie die Quelle ihn angibt. Bei
-`CU`, `FD`, `MN` und `VITB6` rechnet die DGE in mg, der BLS in µg. Ein Vergleich mit der
-Aufnahme muss das umrechnen; der Import meldet diese Fälle bei jedem Lauf.
+**Einheiten:** `wert` und `obergrenze` stehen immer in der Einheit aus `naehrstoff`, die
+für das ganze System führend ist. Weicht die Quelle ab, rechnet der Import um und meldet
+es: die DGE gibt `CU`, `FD`, `MN` und `VITB6` in mg an, der BLS führt sie in µg (mal 1000).
+Anteile (`bezug = prozent_energie`) werden nicht umgerechnet, sie sind keine Masse.
 
 ### fussnote
 | Spalte | Typ | Hinweis |

@@ -98,8 +98,7 @@ BEZUG_JE_EINHEIT = {
 
 GESCHLECHTER = {"Männlich": "m", "Weiblich": "w"}
 
-# Einheit der Quelle -> Einheit, in der der Zahlenwert steht. Dient nur dem
-# Abgleich mit naehrstoff.einheit, umgerechnet wird nichts.
+# Einheit der Quelle -> Masseinheit, in der der Zahlenwert steht.
 MASSEINHEIT_JE_EINHEIT = {
     "mg/Tag": "mg",
     "µg/Tag": "µg",
@@ -107,6 +106,15 @@ MASSEINHEIT_JE_EINHEIT = {
     "g/Tag": "g",
     "g/kg KG/Tag": "g",
 }
+
+# Zehnerpotenz je Masseinheit, bezogen auf Gramm. Als Exponent, damit der
+# Umrechnungsfaktor eine glatte ganze Zahl bleibt: 1e-3 / 1e-6 ergaebe
+# 1000.0000000000001 und damit krumme Werte in der Tabelle.
+ZEHNERPOTENZ_JE_EINHEIT = {"g": 0, "mg": -3, "µg": -6}
+
+# Nur bei diesen Bezuegen ist der Wert eine Masse und darf umgerechnet werden.
+# prozent_energie ist ein Anteil, keine Masse.
+UMRECHENBARE_BEZUEGE = ("absolut", "je_kg")
 
 # Obergrenze fuer Altersgruppen der Form "65 Jahre und älter".
 OFFENES_ENDE = 999
@@ -291,7 +299,7 @@ def importiere(quelle: Path, datenbank: Path) -> None:
     uebersprungen = Counter()
     freitexte = []
     fehlende_codes = set()
-    einheitenkonflikte = {}
+    umgerechnet = {}
     gesehen = set()
 
     try:
@@ -332,12 +340,22 @@ def importiere(quelle: Path, datenbank: Path) -> None:
                     f"Zeile {zeilennummer}: Einheit ohne Bezug: {einheit!r} ({bezeichnung})"
                 )
 
-            # Die Zahl bleibt so stehen, wie die Quelle sie angibt. Weicht die
-            # Einheit von der in naehrstoff ab, wird das am Ende gemeldet: ein
-            # spaeterer Vergleich muesste sonst um Faktor 1000 danebenliegen.
+            # Gespeichert wird in der Einheit aus naehrstoff, die fuer das ganze
+            # System fuehrend ist. Weicht die Quelle ab, wird umgerechnet, sonst
+            # laege ein spaeterer Vergleich um Faktor 1000 daneben.
             masseinheit = MASSEINHEIT_JE_EINHEIT.get(einheit)
-            if bezug == "absolut" and masseinheit and masseinheit != stammdaten[code]["einheit"]:
-                einheitenkonflikte[code] = (bezeichnung, masseinheit, stammdaten[code]["einheit"])
+            ziel_einheit = stammdaten[code]["einheit"]
+            if bezug in UMRECHENBARE_BEZUEGE and masseinheit and masseinheit != ziel_einheit:
+                if ziel_einheit not in ZEHNERPOTENZ_JE_EINHEIT:
+                    raise Abbruch(
+                        f"Zeile {zeilennummer}: {bezeichnung} steht in der Quelle in "
+                        f"{masseinheit}, naehrstoff fuehrt {ziel_einheit!r}. Nicht umrechenbar."
+                    )
+                stufen = ZEHNERPOTENZ_JE_EINHEIT[masseinheit] - ZEHNERPOTENZ_JE_EINHEIT[ziel_einheit]
+                faktor = 10**stufen if stufen >= 0 else 1 / 10 ** (-stufen)
+                wert = None if wert is None else wert * faktor
+                obergrenze = None if obergrenze is None else obergrenze * faktor
+                umgerechnet[code] = (bezeichnung, masseinheit, ziel_einheit, faktor)
 
             kategorie_roh = text(roh[spalte["Kategorie"]])
             if kategorie_roh is None:
@@ -399,12 +417,12 @@ def importiere(quelle: Path, datenbank: Path) -> None:
 
     bericht(gelesen, neu, aktualisiert, ohne_wert, gesamt, anzahl_fussnoten,
             je_kategorie, je_gruppe, uebersprungen, freitexte, fehlende_codes,
-            einheitenkonflikte)
+            umgerechnet)
 
 
 def bericht(gelesen, neu, aktualisiert, ohne_wert, gesamt, anzahl_fussnoten,
             je_kategorie, je_gruppe, uebersprungen, freitexte, fehlende_codes,
-            einheitenkonflikte):
+            umgerechnet):
     print()
     print("Import abgeschlossen")
     print(f"  Zeilen gelesen:             {gelesen}")
@@ -436,13 +454,12 @@ def bericht(gelesen, neu, aktualisiert, ohne_wert, gesamt, anzahl_fussnoten,
         for eintrag in freitexte:
             print(f"    {eintrag}")
 
-    if einheitenkonflikte:
+    if umgerechnet:
         print()
-        print("  ACHTUNG: Die Quelle gibt diese Werte in einer anderen Einheit an als")
-        print("  naehrstoff.einheit. Die Zahlen stehen unveraendert in der Tabelle, ein")
-        print("  Vergleich mit der Aufnahme muss die Einheit umrechnen:")
-        for code, (bezeichnung, quelle_einheit, bls_einheit) in sorted(einheitenkonflikte.items()):
-            print(f"    {code:<8} {bezeichnung:<24} Quelle {quelle_einheit}, naehrstoff {bls_einheit}")
+        print("  Auf die Einheit aus naehrstoff umgerechnet:")
+        for code, (bezeichnung, quelle_einheit, ziel_einheit, faktor) in sorted(umgerechnet.items()):
+            print(f"    {code:<8} {bezeichnung:<24} {quelle_einheit} -> {ziel_einheit} "
+                  f"(mal {faktor:g})")
 
     if fehlende_codes:
         print()
