@@ -37,10 +37,21 @@ def _zahl(wert: float, einheit: str) -> str:
     return f"{wert:.0f} {einheit}" if einheit == "kcal" else f"{wert:.1f} {einheit}"
 
 
+def _eigener_zusatz(zeile) -> str:
+    """Kennzeichnet selbst erfasste Einträge, damit die Herkunft sichtbar bleibt."""
+    if zeile["herkunft"] != "eigen":
+        return ""
+    hersteller = zeile["hersteller"] if "hersteller" in zeile.keys() else None
+    return f" · eigener Eintrag{f', {hersteller}' if hersteller else ''}"
+
+
 def _treffer_text(zeile) -> str:
-    if zeile["kcal_je_100g"] is None:
-        return f"{zeile['bezeichnung']} — Energie unbekannt"
-    return f"{zeile['bezeichnung']} — {zeile['kcal_je_100g']:.0f} kcal/100 g"
+    energie = (
+        "Energie unbekannt"
+        if zeile["kcal_je_100g"] is None
+        else f"{zeile['kcal_je_100g']:.0f} kcal/100 g"
+    )
+    return f"{zeile['bezeichnung']} — {energie}{_eigener_zusatz(zeile)}"
 
 
 # --------------------------------------------------------------------------- #
@@ -131,7 +142,7 @@ def _anzeige(profil_id: int, datum: date, tagesabschnitt: str) -> list:
 
     for position in positionen:
         zeile = st.columns(SPALTENBREITEN)
-        zeile[0].write(position["bezeichnung"])
+        zeile[0].write(position["bezeichnung"] + _eigener_zusatz(position))
         zeile[1].write(f"{position['menge_g']:.0f} g")
 
         for stelle, (code, _) in enumerate(ANZEIGE_NAEHRSTOFFE, start=2):
@@ -247,7 +258,7 @@ def _unvertraeglichkeiten(profil_id: int, positionen: list) -> None:
                 ohne_angabe += 1
 
             spalten = st.columns(breiten)
-            spalten[0].write(position["bezeichnung"])
+            spalten[0].write(position["bezeichnung"] + _eigener_zusatz(position))
             spalten[1].write(f"{position['menge_g']:.0f} g")
             text = _aussage(zustand, stoff, menge, einheit, herkunft, schwelle)
             if zustand == berechnung.OHNE_ANGABE:

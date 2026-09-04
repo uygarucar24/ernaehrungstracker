@@ -109,13 +109,14 @@ Der Browser öffnet sich auf http://localhost:8501. Das Terminalfenster muss off
 
 ```
 ernaehrungstracker/
-├── app.py                          Einstieg: Profilwahl, Navigation über fünf Seiten
+├── app.py                          Einstieg: Profilwahl, Navigation über sechs Seiten
 ├── src/
 │   ├── berechnung.py               Alter, Grundumsatz, Tagesblöcke, Kalorienziel, Summen
 │   ├── datenbank.py                Schema und sämtliche Datenzugriffe
 │   └── seiten/                     je eine Datei pro Seite
 │       ├── profil.py
 │       ├── mahlzeiten.py
+│       ├── lebensmittel.py
 │       ├── aktivitaet.py
 │       ├── gewicht.py
 │       └── tagesuebersicht.py
@@ -136,15 +137,16 @@ ernaehrungstracker/
 └── tracker.db                      wird beim Import angelegt, nicht im Repository
 ```
 
-### Die fünf Seiten
+### Die sechs Seiten
 
 | Seite | Inhalt |
 |---|---|
 | **Profilverwaltung** | Profil anlegen (erwachsen oder Kind), Ziel als Modus abnehmen / zunehmen / halten mit Tempo ohne Vorzeichen, Laktoseintoleranz; Wechsel zwischen Profilen |
-| **Mahlzeiten** | Datum und Tagesabschnitt wählen, Lebensmittel über Textsuche finden, Menge in Gramm erfassen; Werte je Position und Summe mit Angabe der Abdeckung |
+| **Mahlzeiten** | Datum und Tagesabschnitt wählen, Lebensmittel über Textsuche finden, Menge in Gramm erfassen; Werte je Position und Summe mit Angabe der Abdeckung, dazu die Prüfung auf hinterlegte Unverträglichkeiten |
+| **Lebensmittel** | Eigene Produkte mit Bezeichnung, Hersteller und Nährwertdeklaration erfassen, ändern und archivieren |
 | **Aktivität** | Schlaf, Tagestyp mit vorbelegten Arbeitszeiten, Sporteinheiten; Tagesbedarf mit Grundumsatz, Aktivitäts- und Sportanteil sowie vollständiger Aufschlüsselung des Tages |
 | **Gewicht** | Gewicht je Datum erfassen, Verlauf über vier Wochen, zwölf Monate oder gesamt, mit gleitendem Durchschnitt über ein Kalenderfenster von sieben Tagen |
-| **Tagesübersicht** | Bedarf, Kalorienziel, Aufnahme und Differenz an einem Tag, dazu die Mahlzeiten mit ihren Summen und die Makronährstoffe |
+| **Tagesübersicht** | Bedarf, Kalorienziel, Aufnahme und Differenz an einem Tag, die Mahlzeiten mit ihren Summen, die Makronährstoffe und der Vergleich mit den DGE-Referenzwerten samt Wochenauswertung |
 
 ## Datenquellen und Lizenz
 
@@ -208,19 +210,19 @@ Umgesetzt:
   vollständiger Tagesbedarfsrechnung samt Kalorienziel
 - Gewichtsverlauf mit gleitendem Durchschnitt über ein Kalenderfenster
 - Tagesübersicht als Zusammenführung von Bedarf und Aufnahme
+- Vergleich der Zufuhr mit den DGE-Referenzwerten, gruppiert nach energieliefernden
+  Nährstoffen, Vitaminen und Mineralstoffen, dazu eine Auswertung über sieben Tage
+- Prüfung auf hinterlegte Unverträglichkeiten je Mahlzeitenposition
+- Eigene Lebensmittel mit Nährwertdeklaration anlegen, ändern und archivieren
 
 Offen:
 
-- Vergleich der Aufnahme mit den Referenzwerten: die Tabelle `referenzwert` ist gefüllt,
-  in der Oberfläche wird sie noch nicht ausgewertet
 - KI-Hinweise (`ki_hinweis`) sind im Datenmodell beschrieben, die Tabelle wird noch nicht
   angelegt
-- Auswertung der Unverträglichkeiten in der Mahlzeitenansicht
-- Eigene Lebensmittel (`herkunft = 'eigen'`) lassen sich noch nicht über die Oberfläche
-  anlegen
-- Angezeigt werden bisher fünf Nährstoffe (Energie, Eiweiß, Fett, Kohlenhydrate, Zucker);
-  Salz, gesättigte Fettsäuren, Lactose sowie die Vitamine und Mineralstoffe liegen in der
-  Datenbank, warten aber auf den Vergleich mit Referenzwerten
+- Fructose und Zuckeralkohole werden noch nicht importiert; die Unverträglichkeitsprüfung
+  könnte sie ohne Codeänderung mitnehmen
+- Nährstoffe mit Bezug auf den Energieanteil (Fett, Kohlenhydrate) werden noch nicht mit
+  ihren Referenzwerten verglichen
 - CSV-Export (vorgesehen als UTF-8 mit BOM)
 
 Bewusst nicht vorgesehen sind Sätze und Wiederholungen im Training, Bilderkennung von

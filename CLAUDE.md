@@ -62,11 +62,26 @@ Rate.
 | hersteller | TEXT NULL | |
 | archiviert | INTEGER | |
 
+**Eigene Lebensmittel** (`herkunft = 'eigen'`, `bls_schluessel` leer) werden auf der Seite
+Lebensmittel erfasst: Bezeichnung, Hersteller und die sieben Pflichtangaben der
+EU-Nährwertdeklaration je 100 Gramm (Energie, Fett, davon gesättigte Fettsäuren,
+Kohlenhydrate, davon Zucker, Eiweiß, Salz), dazu freiwillig weitere Nährstoffe. Jeder
+geschriebene Wert bekommt `wert_herkunft = 'verpackung'`. Ein leeres Feld erzeugt **keine**
+Zeile in `naehrwert`; eine ausdrücklich eingetragene 0 wird als 0 gespeichert. In Suche und
+Mahlzeit sind eigene Einträge als solche gekennzeichnet.
+
+Dass eigene Einträge die Abdeckung senken und in der Unverträglichkeitsprüfung als „keine
+Angabe" erscheinen, ist richtig und wird nicht umgangen. Bearbeiten wirkt rückwirkend auf
+alle Auswertungen, weil Mahlzeiten nur Lebensmittel und Menge speichern. Archivieren nimmt
+einen Eintrag aus der Suche; gelöscht wird nur, worauf keine Position verweist.
+
 Ein erneuter Lauf von `importe/import_bls.py --ersetzen` **aktualisiert** vorhandene Einträge
 anhand von `bls_schluessel` und ersetzt ihre Nährwerte. Die `lebensmittel_id` bleibt
 erhalten, damit Verweise aus `mahlzeit_position` gültig bleiben. Einträge, die in der
 neuen Ausgabe fehlen, werden auf `archiviert = 1` gesetzt, nicht gelöscht, damit alte
 Mahlzeiten nachvollziehbar bleiben. Die Suche zeigt nur nicht archivierte Einträge.
+Eigene Lebensmittel bleiben davon vollständig unberührt: das Skript arbeitet nur auf
+Kennungen mit `herkunft = 'bls'`, auch beim Leeren von `naehrwert`.
 
 ### naehrstoff
 | Spalte | Typ | Hinweis |

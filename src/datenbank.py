@@ -27,6 +27,13 @@ TAGESABSCHNITTE = ("fruehstueck", "mittag", "abend", "snack")
 # Bezugsmenge der Nährwerte: naehrwert.wert_je_100g gilt je 100 Gramm.
 BEZUGSMENGE_G = 100.0
 
+# Pflichtangaben der Nährwertdeklaration nach EU-Recht, in der Reihenfolge der
+# Verpackung. Sie stehen auf jedem Produkt, deshalb entstehen hier keine Lücken.
+DEKLARATION_CODES = ("ENERCC", "FAT", "FASAT", "CHO", "SUGAR", "PROT625", "NACL")
+
+# Herkunft der Werte bei selbst erfassten Lebensmitteln.
+HERKUNFT_VERPACKUNG = "verpackung"
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS profil (
     profil_id          INTEGER PRIMARY KEY,
@@ -324,7 +331,7 @@ def lebensmittel_suchen(text: str, grenze: int = 50) -> list[sqlite3.Row]:
         con.create_function("klein", 1, lambda wert: (wert or "").lower())
         try:
             return con.execute(
-                "SELECT l.lebensmittel_id, l.bezeichnung, ("
+                "SELECT l.lebensmittel_id, l.bezeichnung, l.herkunft, l.hersteller, ("
                 "  SELECT w.wert_je_100g FROM naehrwert w JOIN naehrstoff n"
                 "  ON n.naehrstoff_id = w.naehrstoff_id"
                 "  WHERE w.lebensmittel_id = l.lebensmittel_id AND n.bls_spalte = 'ENERCC'"
@@ -364,6 +371,18 @@ def naehrstoffe(codes: tuple[str, ...]) -> dict[str, sqlite3.Row]:
     return {zeile["bls_spalte"]: zeile for zeile in zeilen}
 
 
+def alle_naehrstoffe() -> list[sqlite3.Row]:
+    """Alle Nährstoffe der Stammdaten, in ihrer Reihenfolge."""
+    with verbindung() as con:
+        try:
+            return con.execute(
+                "SELECT naehrstoff_id, bls_spalte, name, einheit, gruppe FROM naehrstoff "
+                "ORDER BY naehrstoff_id"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+
+
 def naehrwerte(lebensmittel_ids: list[int], codes: tuple[str, ...]) -> dict[tuple[int, str], float]:
     """Werte je 100 Gramm für mehrere Lebensmittel auf einmal.
 
@@ -393,7 +412,8 @@ def mahlzeit_positionen(profil_id: int, datum: date, tagesabschnitt: str) -> lis
     with verbindung() as con:
         try:
             return con.execute(
-                "SELECT p.position_id, p.lebensmittel_id, p.menge_g, l.bezeichnung "
+                "SELECT p.position_id, p.lebensmittel_id, p.menge_g, l.bezeichnung, "
+                "l.herkunft, l.hersteller "
                 "FROM mahlzeit_position p "
                 "JOIN mahlzeit m ON m.mahlzeit_id = p.mahlzeit_id "
                 "JOIN lebensmittel l ON l.lebensmittel_id = p.lebensmittel_id "
@@ -477,6 +497,138 @@ def mahlzeiten_am_tag(profil_id: int, datum: date) -> list[sqlite3.Row]:
             ).fetchall()
         except sqlite3.OperationalError:
             return []  # lebensmittel gibt es noch nicht, import_bls.py fehlt
+
+
+def lebensmittel(lebensmittel_id: int) -> sqlite3.Row | None:
+    with verbindung() as con:
+        try:
+            return con.execute(
+                "SELECT * FROM lebensmittel WHERE lebensmittel_id = ?", (lebensmittel_id,)
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return None
+
+
+def eigene_lebensmittel(mit_archivierten: bool = True) -> list[sqlite3.Row]:
+    """Selbst erfasste Lebensmittel, neueste zuerst."""
+    bedingung = "" if mit_archivierten else " AND archiviert = 0"
+    with verbindung() as con:
+        try:
+            return con.execute(
+                "SELECT * FROM lebensmittel WHERE herkunft = 'eigen'"
+                + bedingung
+                + " ORDER BY lebensmittel_id DESC"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+
+
+def naehrwerte_eines_lebensmittels(lebensmittel_id: int) -> dict[str, sqlite3.Row]:
+    """BLS-Code -> Zeile aus naehrwert. Fehlt ein Code, gibt es dazu keine Angabe."""
+    with verbindung() as con:
+        try:
+            zeilen = con.execute(
+                "SELECT n.bls_spalte, w.wert_je_100g, w.wert_herkunft FROM naehrwert w "
+                "JOIN naehrstoff n ON n.naehrstoff_id = w.naehrstoff_id "
+                "WHERE w.lebensmittel_id = ?",
+                (lebensmittel_id,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return {}
+    return {zeile["bls_spalte"]: zeile for zeile in zeilen}
+
+
+def positionen_mit_lebensmittel(lebensmittel_id: int) -> int:
+    """Zahl der Mahlzeitenpositionen, die auf dieses Lebensmittel verweisen."""
+    with verbindung() as con:
+        try:
+            return con.execute(
+                "SELECT COUNT(*) FROM mahlzeit_position WHERE lebensmittel_id = ?",
+                (lebensmittel_id,),
+            ).fetchone()[0]
+        except sqlite3.OperationalError:
+            return 0
+
+
+def eigenes_lebensmittel_speichern(
+    bezeichnung: str,
+    hersteller: str | None,
+    werte: dict[str, float | None],
+    lebensmittel_id: int | None = None,
+) -> int:
+    """Legt ein eigenes Lebensmittel an oder ändert es und schreibt seine Nährwerte.
+
+    Nur Nährstoffe mit einem Wert bekommen eine Zeile in naehrwert. Ein leeres
+    Feld erzeugt keine Zeile; eine ausdrücklich eingetragene 0 wird als 0
+    gespeichert. Jede geschriebene Zeile bekommt wert_herkunft = verpackung.
+    """
+    if not bezeichnung.strip():
+        raise DatenFehler("Bitte eine Bezeichnung eingeben.")
+
+    with verbindung() as con:
+        kennungen = {
+            zeile["bls_spalte"]: zeile["naehrstoff_id"]
+            for zeile in con.execute("SELECT bls_spalte, naehrstoff_id FROM naehrstoff")
+        }
+        unbekannt = [code for code in werte if code not in kennungen]
+        if unbekannt:
+            raise DatenFehler(f"Unbekannte Nährstoffe: {', '.join(unbekannt)}")
+
+        if lebensmittel_id is None:
+            cursor = con.execute(
+                "INSERT INTO lebensmittel (herkunft, bls_schluessel, bezeichnung, "
+                "basis_menge_g, hersteller, archiviert) VALUES ('eigen', NULL, ?, ?, ?, 0)",
+                (bezeichnung.strip(), BEZUGSMENGE_G, (hersteller or "").strip() or None),
+            )
+            lebensmittel_id = cursor.lastrowid
+        else:
+            vorhanden = con.execute(
+                "SELECT herkunft FROM lebensmittel WHERE lebensmittel_id = ?",
+                (lebensmittel_id,),
+            ).fetchone()
+            if vorhanden is None or vorhanden["herkunft"] != "eigen":
+                raise DatenFehler("Nur selbst erfasste Lebensmittel lassen sich ändern.")
+            con.execute(
+                "UPDATE lebensmittel SET bezeichnung = ?, hersteller = ? "
+                "WHERE lebensmittel_id = ?",
+                (bezeichnung.strip(), (hersteller or "").strip() or None, lebensmittel_id),
+            )
+
+        con.execute("DELETE FROM naehrwert WHERE lebensmittel_id = ?", (lebensmittel_id,))
+        for code, wert in werte.items():
+            if wert is None:
+                continue  # Kein Wert heisst keine Zeile, nicht 0.
+            con.execute(
+                "INSERT INTO naehrwert (lebensmittel_id, naehrstoff_id, wert_je_100g, "
+                "wert_herkunft) VALUES (?, ?, ?, ?)",
+                (lebensmittel_id, kennungen[code], float(wert), HERKUNFT_VERPACKUNG),
+            )
+    return lebensmittel_id
+
+
+def lebensmittel_archivieren(lebensmittel_id: int, archiviert: bool = True) -> None:
+    """Nimmt ein eigenes Lebensmittel aus der Suche, ohne es zu löschen."""
+    with verbindung() as con:
+        con.execute(
+            "UPDATE lebensmittel SET archiviert = ? WHERE lebensmittel_id = ? "
+            "AND herkunft = 'eigen'",
+            (1 if archiviert else 0, lebensmittel_id),
+        )
+
+
+def eigenes_lebensmittel_loeschen(lebensmittel_id: int) -> None:
+    """Löscht ein eigenes Lebensmittel, solange keine Position darauf verweist."""
+    if positionen_mit_lebensmittel(lebensmittel_id):
+        raise DatenFehler(
+            "Auf dieses Lebensmittel verweisen Mahlzeitenpositionen. Es lässt sich "
+            "archivieren, aber nicht löschen, damit alte Mahlzeiten auswertbar bleiben."
+        )
+    with verbindung() as con:
+        con.execute("DELETE FROM naehrwert WHERE lebensmittel_id = ?", (lebensmittel_id,))
+        con.execute(
+            "DELETE FROM lebensmittel WHERE lebensmittel_id = ? AND herkunft = 'eigen'",
+            (lebensmittel_id,),
+        )
 
 
 def position_hinzufuegen(
