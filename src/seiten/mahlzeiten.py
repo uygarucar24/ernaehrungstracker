@@ -247,7 +247,10 @@ def _unvertraeglichkeiten(profil_id: int, positionen: list) -> None:
             spalte.caption(text)
 
         summe = 0.0
-        mit_wert = 0
+        # Abdeckung als Mengenanteil, dieselbe Regel wie bei den Nährwertsummen:
+        # 400 g ohne Angabe wiegen schwerer als 100 g ohne Angabe.
+        menge_mit_wert = 0.0
+        menge_gesamt = sum(position["menge_g"] for position in positionen)
         ohne_angabe = 0
         for position in positionen:
             zeile = werte.get((position["lebensmittel_id"], code))
@@ -260,7 +263,8 @@ def _unvertraeglichkeiten(profil_id: int, positionen: list) -> None:
                 menge = berechnung.menge_je_portion(
                     wert, position["menge_g"], datenbank.BEZUGSMENGE_G
                 )
-                mit_wert += 1
+                # Ein ausdrücklich erfasster Nullwert zählt als vorhanden.
+                menge_mit_wert += position["menge_g"]
                 summe += menge
             if zustand == berechnung.OHNE_ANGABE:
                 ohne_angabe += 1
@@ -277,8 +281,8 @@ def _unvertraeglichkeiten(profil_id: int, positionen: list) -> None:
                 spalten[2].write(text)
 
         st.caption(
-            f"Enthaltene Menge über alle Positionen: {summe:.2f} {einheit}, "
-            f"ermittelt aus {mit_wert} von {len(positionen)} Positionen. "
+            f"Enthaltene Menge über alle Positionen: {summe:.2f} {einheit}, ermittelt aus "
+            f"{berechnung.abdeckungstext(menge_mit_wert, menge_gesamt)}. "
             + (
                 f"{ohne_angabe} Position(en) ohne Angabe gehen nicht in die Summe ein."
                 if ohne_angabe

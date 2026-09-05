@@ -156,8 +156,11 @@ Der vierte Fall ist **keine Entwarnung**: er wird sichtbar anders dargestellt un
 löst jeder Wert über null einen Hinweis aus, weil die individuelle Empfindlichkeit stark
 schwankt.
 
-Auf Mahlzeitenebene wird die enthaltene Menge summiert und genannt, auf wie vielen
-Positionen die Summe beruht; Positionen ohne Angabe gehen nicht als null ein. Die
+Auf Mahlzeitenebene wird die enthaltene Menge summiert und dazu die Abdeckung als
+**Mengenanteil** genannt, über dieselbe Funktion wie bei den Nährwertsummen
+(`berechnung.abdeckungstext`). Zusätzlich bleibt die Zahl der Positionen ohne Angabe
+sichtbar, weil sie sagt, wie viele Lebensmittel betroffen sind. Positionen ohne Angabe
+gehen nicht als null in die Summe ein. Die
 Wortwahl beschreibt ausschließlich den Datenbestand: kein „unbedenklich", „verträglich"
 oder „geeignet", dazu der Hinweis, dass die Verpackungsdeklaration maßgeblich bleibt.
 
