@@ -280,15 +280,26 @@ def _unvertraeglichkeiten(profil_id: int, positionen: list) -> None:
             else:
                 spalten[2].write(text)
 
-        st.caption(
-            f"Enthaltene Menge über alle Positionen: {summe:.2f} {einheit}, ermittelt aus "
-            f"{berechnung.abdeckungstext(menge_mit_wert, menge_gesamt)}. "
-            + (
-                f"{ohne_angabe} Position(en) ohne Angabe gehen nicht in die Summe ein."
-                if ohne_angabe
-                else "Für alle Positionen liegt eine Angabe vor."
+        if menge_mit_wert:
+            st.caption(
+                f"Enthaltene Menge über alle Positionen: {summe:.2f} {einheit}, ermittelt aus "
+                f"{berechnung.abdeckungstext(menge_mit_wert, menge_gesamt)}. "
+                + (
+                    f"{ohne_angabe} Position(en) ohne Angabe gehen nicht in die Summe ein."
+                    if ohne_angabe
+                    else "Für alle Positionen liegt eine Angabe vor."
+                )
             )
-        )
+        else:
+            # Ohne eine einzige Angabe ist die Summe unbekannt. Eine ausgewiesene
+            # 0,00 g läse sich als Nachweis, dass nichts enthalten ist, und wäre
+            # eine Entwarnung, die der Datenbestand nicht hergibt.
+            st.caption(
+                f"Enthaltene Menge über alle Positionen: unbekannt, für keine der "
+                f"{len(positionen)} Positionen liegt eine Angabe zu {stoff} vor "
+                f"({berechnung.abdeckungstext(menge_mit_wert, menge_gesamt)}). Daraus folgt "
+                f"nicht, dass kein(e) {stoff} enthalten ist."
+            )
 
     st.caption(
         "Die Angaben stammen aus dem hinterlegten Datenbestand und beschreiben nur, "

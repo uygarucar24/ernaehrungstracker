@@ -160,7 +160,13 @@ Auf Mahlzeitenebene wird die enthaltene Menge summiert und dazu die Abdeckung al
 **Mengenanteil** genannt, über dieselbe Funktion wie bei den Nährwertsummen
 (`berechnung.abdeckungstext`). Zusätzlich bleibt die Zahl der Positionen ohne Angabe
 sichtbar, weil sie sagt, wie viele Lebensmittel betroffen sind. Positionen ohne Angabe
-gehen nicht als null in die Summe ein. Die
+gehen nicht als null in die Summe ein.
+
+Liegt für **keine** Position eine Angabe vor, ist die Summe *unbekannt* und wird nicht als
+0,00 g ausgegeben: eine ausgewiesene Null läse sich als Nachweis, dass der Stoff nicht
+enthalten ist, und wäre eine Entwarnung, die der Datenbestand nicht hergibt. Beruht die
+Summe dagegen auf ausdrücklich belegten Nullwerten, steht dort 0,00 g, weil der Stoff
+tatsächlich nicht enthalten ist. Die
 Wortwahl beschreibt ausschließlich den Datenbestand: kein „unbedenklich", „verträglich"
 oder „geeignet", dazu der Hinweis, dass die Verpackungsdeklaration maßgeblich bleibt.
 
