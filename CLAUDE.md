@@ -392,6 +392,45 @@ nicht aufgebaut. Sichtbar sind Mahlzeiten, Tagessumme und Makronährstoffe.
 Liegt für einen Tag kein Eintrag in `tag_aktivitaet` vor, wird KEIN Tagesbedarf
 ausgegeben. Nicht ersatzweise nur den Grundumsatz anzeigen.
 
+## Datenexport
+
+Reine Datenausgabe eines wählbaren Zeitraums für das aktive Profil. **Keine Bewertungen,
+keine Einstufungen, keine Empfehlungen** — der Export gibt aus, was erfasst und was daraus
+berechnet wurde. Die Zusammenstellung erfolgt auf Knopfdruck, nicht bei jedem Neuaufbau
+der Seite, weil das Lesen des Tagesbedarfs ihn zugleich neu schreibt.
+
+Format: CSV, **UTF-8 mit BOM**, Komma als Feldtrennzeichen, Punkt als Dezimaltrennzeichen,
+Datum als `JJJJ-MM-TT`. Beides gehört zusammen; gemischt wäre die Datei nicht mehr
+eindeutig lesbar. Gerundet wird erst beim Schreiben (drei Nachkommastellen bei
+Nährwerten), damit eine in der Tabellenkalkulation neu gebildete Tagessumme mit der
+Anzeige übereinstimmt.
+
+| Datei | Zeile entspricht |
+|---|---|
+| `rahmenangaben.csv` | Angabe/Wert: Profil, Zeitraum, Exportdatum, Dateiliste, Quellen mit Version |
+| `mahlzeitenpositionen.csv` | einer Mahlzeitenposition, je Nährstoff eine Wert- und eine Herkunftsspalte |
+| `aktivitaet_und_sport.csv` | einem Zeitblock des Tages: Schlaf, Arbeit nach Haltung, Sporteinheit, Restzeit |
+| `gewicht.csv` | einem Tag mit Gewichtseintrag |
+| `tagesbedarf.csv` | einem Tag mit Aktivität, Sport oder Mahlzeit |
+
+**Leer ist nicht null.** Fehlt die Zeile in `naehrwert`, bleiben Wert und Herkunft leer.
+Ein Tag ohne Eintrag in `tag_aktivitaet` hat keinen Tagesbedarf: die Felder bleiben leer,
+der Grund steht in der Spalte `status`. Eine echte 0 aus der Quelle steht als 0 in der
+Datei. Diese Regel ist der Kern des Exports, weil in einer Tabellenkalkulation sonst genau
+die Verwechslung entsteht, die die Anwendung vermeidet.
+
+**Herkunft mitführen.** Zu jedem Nährwert steht der Quellencode aus
+`naehrwert.wert_herkunft` daneben, bei selbst erfassten Lebensmitteln `verpackung`. Je
+Position wird zusätzlich ausgewiesen, ob das Lebensmittel aus dem Datenbestand stammt oder
+selbst erfasst wurde. Die Nährwerte sind auf die erfasste Menge umgerechnet, die Einheit
+steht in der Spaltenüberschrift und kommt aus `naehrstoff`. Minuten sind als `erfasst` oder
+`berechnet` gekennzeichnet, die Restzeit ist immer berechnet.
+
+**Kinderprofil:** keine Kalorienbilanz und keine Zielwerte. `tagesbedarf.csv` wird nicht
+erzeugt und die Aktivität ohne Energiespalte ausgegeben; Arbeitsblöcke entstehen nicht,
+weil im Kinderprofil keine Arbeitszeit erfasst wird. Mahlzeiten, Aktivität und Gewicht
+werden vollständig ausgegeben.
+
 ## Bewusst nicht enthalten
 
 Nicht einbauen, auch nicht als Vorschlag:

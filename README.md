@@ -109,17 +109,19 @@ Der Browser öffnet sich auf http://localhost:8501. Das Terminalfenster muss off
 
 ```
 ernaehrungstracker/
-├── app.py                          Einstieg: Profilwahl, Navigation über sechs Seiten
+├── app.py                          Einstieg: Profilwahl, Navigation über sieben Seiten
 ├── src/
 │   ├── berechnung.py               Alter, Grundumsatz, Tagesblöcke, Kalorienziel, Summen
 │   ├── datenbank.py                Schema und sämtliche Datenzugriffe
+│   ├── export.py                   CSV-Dateien und ZIP des Datenexports
 │   └── seiten/                     je eine Datei pro Seite
 │       ├── profil.py
 │       ├── mahlzeiten.py
 │       ├── lebensmittel.py
 │       ├── aktivitaet.py
 │       ├── gewicht.py
-│       └── tagesuebersicht.py
+│       ├── tagesuebersicht.py
+│       └── datenexport.py
 ├── importe/                        einmalige Skripte, nicht Teil der Anwendung
 │   ├── import_bls.py               Bundeslebensmittelschlüssel
 │   ├── import_sportarten.py        Sportartenkatalog
@@ -137,7 +139,7 @@ ernaehrungstracker/
 └── tracker.db                      wird beim Import angelegt, nicht im Repository
 ```
 
-### Die sechs Seiten
+### Die sieben Seiten
 
 | Seite | Inhalt |
 |---|---|
@@ -147,6 +149,32 @@ ernaehrungstracker/
 | **Aktivität** | Schlaf, Tagestyp mit vorbelegten Arbeitszeiten, Sporteinheiten; Tagesbedarf mit Grundumsatz, Aktivitäts- und Sportanteil sowie vollständiger Aufschlüsselung des Tages |
 | **Gewicht** | Gewicht je Datum erfassen, Verlauf über vier Wochen, zwölf Monate oder gesamt, mit gleitendem Durchschnitt über ein Kalenderfenster von sieben Tagen |
 | **Tagesübersicht** | Bedarf, Kalorienziel, Aufnahme und Differenz an einem Tag, die Mahlzeiten mit ihren Summen, die Makronährstoffe und der Vergleich mit den DGE-Referenzwerten samt Wochenauswertung |
+| **Datenexport** | Wählbaren Zeitraum als ZIP herunterladen: je eine CSV-Datei für Mahlzeitenpositionen, Aktivität und Sport, Gewicht und Tagesbedarf, dazu die Rahmenangaben mit Profil, Zeitraum, Exportdatum und Quellen |
+
+## Datenexport
+
+Ausgegeben wird ein wählbarer Zeitraum des aktiven Profils als ZIP mit CSV-Dateien,
+**UTF-8 mit BOM**, Komma als Feldtrennzeichen, Punkt als Dezimaltrennzeichen, Datum als
+`JJJJ-MM-TT`. Es ist eine reine Datenausgabe: keine Einstufungen, keine Empfehlungen.
+
+| Datei | Inhalt |
+|---|---|
+| `rahmenangaben.csv` | Profil, Zeitraum, Exportdatum, Aufbau der Dateien und die verwendeten Quellen mit Version |
+| `mahlzeitenpositionen.csv` | eine Zeile je Position, je Nährstoff eine Wert- und eine Herkunftsspalte, auf die erfasste Menge umgerechnet |
+| `aktivitaet_und_sport.csv` | eine Zeile je Zeitblock: Schlaf, Arbeit nach Haltung, Sporteinheiten und die berechnete Restzeit, mit MET-Wert und Quelle |
+| `gewicht.csv` | nur Tage mit Eintrag |
+| `tagesbedarf.csv` | je Tag Grundumsatz, Aktivitäts- und Sportanteil, Bedarf, Kalorienziel, Aufnahme und Differenz |
+
+**Ein leeres Feld bedeutet: kein Wert vorhanden.** Es ist nie als 0 zu lesen. Fehlt die
+Zeile in `naehrwert`, bleiben Wert und Herkunft leer; ein Tag ohne Aktivitätseintrag hat
+keinen Tagesbedarf, die Felder bleiben leer und der Grund steht in der Spalte `status`.
+Eine echte 0 aus der Quelle steht dagegen als 0 in der Datei.
+
+Kinderprofile bekommen dieselben Daten ohne Kalorienbilanz und ohne Zielwerte:
+`tagesbedarf.csv` wird nicht erzeugt und die Aktivität ohne Energiespalte ausgegeben.
+
+Excel öffnet die Dateien über **Daten → Aus Text/CSV** mit dem Punkt als
+Dezimaltrennzeichen; beim Doppelklick nimmt es die Einstellung des Systems.
 
 ## Datenquellen und Lizenz
 
@@ -214,6 +242,7 @@ Umgesetzt:
   Nährstoffen, Vitaminen und Mineralstoffen, dazu eine Auswertung über sieben Tage
 - Prüfung auf hinterlegte Unverträglichkeiten je Mahlzeitenposition
 - Eigene Lebensmittel mit Nährwertdeklaration anlegen, ändern und archivieren
+- Datenexport eines Zeitraums als ZIP mit fünf CSV-Dateien, UTF-8 mit BOM
 
 Offen:
 
@@ -223,7 +252,6 @@ Offen:
   könnte sie ohne Codeänderung mitnehmen
 - Nährstoffe mit Bezug auf den Energieanteil (Fett, Kohlenhydrate) werden noch nicht mit
   ihren Referenzwerten verglichen
-- CSV-Export (vorgesehen als UTF-8 mit BOM)
 
 Bewusst nicht vorgesehen sind Sätze und Wiederholungen im Training, Bilderkennung von
 Mahlzeiten, Wearable-Anbindung, Cloud-Speicherung und Rezepte.

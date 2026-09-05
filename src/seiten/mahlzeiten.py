@@ -11,12 +11,9 @@ import streamlit as st
 
 from src import berechnung, datenbank
 
-ABSCHNITT_ANZEIGE = {
-    "fruehstueck": "Frühstück",
-    "mittag": "Mittagessen",
-    "abend": "Abendessen",
-    "snack": "Snack",
-}
+# Die Beschriftung steht in datenbank.py neben der Werteliste, damit Oberfläche
+# und Export sie nicht getrennt führen.
+ABSCHNITT_ANZEIGE = datenbank.TAGESABSCHNITT_ANZEIGE
 
 # Angezeigte Nährstoffe. Der Name kommt hier aus der Anzeige, die Einheit
 # ausschließlich aus der Tabelle naehrstoff.

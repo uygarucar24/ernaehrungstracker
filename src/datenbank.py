@@ -24,6 +24,15 @@ ZIEL_MODI = ("abnehmen", "zunehmen", "halten")
 # Feste Werteliste, kein Freitext.
 TAGESABSCHNITTE = ("fruehstueck", "mittag", "abend", "snack")
 
+# Anzeigename je Tagesabschnitt. Steht neben der Werteliste, damit Oberfläche
+# und Export dieselbe Beschriftung verwenden.
+TAGESABSCHNITT_ANZEIGE = {
+    "fruehstueck": "Frühstück",
+    "mittag": "Mittagessen",
+    "abend": "Abendessen",
+    "snack": "Snack",
+}
+
 # Bezugsmenge der Nährwerte: naehrwert.wert_je_100g gilt je 100 Gramm.
 BEZUGSMENGE_G = 100.0
 
@@ -445,6 +454,17 @@ def referenzwerte(geschlecht: str, alter_jahre: int) -> list[sqlite3.Row]:
             return []  # referenzwert gibt es noch nicht, import_referenzwerte.py fehlt
 
 
+def referenzwert_quelle() -> sqlite3.Row | None:
+    """Bezeichnung und Stand der Referenzwerte, für die Quellenangabe im Export."""
+    with verbindung() as con:
+        try:
+            return con.execute(
+                "SELECT quelle, stand FROM referenzwert LIMIT 1"
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return None  # referenzwert gibt es noch nicht, import_referenzwerte.py fehlt
+
+
 def aufnahme_je_tag(profil_id: int, von: date, bis: date) -> dict[str, dict]:
     """Zufuhr je Tag und Nährstoff im Zeitraum, einschließlich beider Ränder.
 
@@ -494,6 +514,30 @@ def mahlzeiten_am_tag(profil_id: int, datum: date) -> list[sqlite3.Row]:
                 "JOIN lebensmittel l ON l.lebensmittel_id = p.lebensmittel_id "
                 "WHERE m.profil_id = ? AND m.datum = ? ORDER BY p.position_id",
                 (profil_id, datum.isoformat()),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []  # lebensmittel gibt es noch nicht, import_bls.py fehlt
+
+
+def positionen_zeitraum(profil_id: int, von: date, bis: date) -> list[sqlite3.Row]:
+    """Alle Mahlzeitenpositionen eines Zeitraums, beide Ränder eingeschlossen.
+
+    Mitgeliefert wird alles, was die Position beschreibt: Datum, Tagesabschnitt,
+    Menge und das Lebensmittel mit Herkunft, damit der Export erkennen lässt, ob
+    der Eintrag aus dem Bundeslebensmittelschlüssel stammt oder selbst erfasst
+    wurde.
+    """
+    with verbindung() as con:
+        try:
+            return con.execute(
+                "SELECT m.datum, m.tagesabschnitt, p.position_id, p.lebensmittel_id, "
+                "p.menge_g, p.uhrzeit, l.bezeichnung, l.hersteller, l.herkunft, "
+                "l.bls_schluessel "
+                "FROM mahlzeit m JOIN mahlzeit_position p ON p.mahlzeit_id = m.mahlzeit_id "
+                "JOIN lebensmittel l ON l.lebensmittel_id = p.lebensmittel_id "
+                "WHERE m.profil_id = ? AND m.datum BETWEEN ? AND ? "
+                "ORDER BY m.datum, p.position_id",
+                (profil_id, von.isoformat(), bis.isoformat()),
             ).fetchall()
         except sqlite3.OperationalError:
             return []  # lebensmittel gibt es noch nicht, import_bls.py fehlt
@@ -700,6 +744,16 @@ def tag_aktivitaet(profil_id: int, datum: date) -> sqlite3.Row | None:
         ).fetchone()
 
 
+def tagesaktivitaeten(profil_id: int, von: date, bis: date) -> list[sqlite3.Row]:
+    """Alle Tage eines Zeitraums mit Eintrag. Tage ohne Eintrag fehlen ganz."""
+    with verbindung() as con:
+        return con.execute(
+            "SELECT * FROM tag_aktivitaet WHERE profil_id = ? AND datum BETWEEN ? AND ? "
+            "ORDER BY datum",
+            (profil_id, von.isoformat(), bis.isoformat()),
+        ).fetchall()
+
+
 def tag_aktivitaet_speichern(
     profil_id: int,
     datum: date,
@@ -801,6 +855,22 @@ def sporteinheiten(profil_id: int, datum: date) -> list[sqlite3.Row]:
             return []
 
 
+def sporteinheiten_zeitraum(profil_id: int, von: date, bis: date) -> list[sqlite3.Row]:
+    """Sporteinheiten eines Zeitraums mit Sportart, MET-Wert und Quelle."""
+    with verbindung() as con:
+        try:
+            return con.execute(
+                "SELECT e.einheit_id, e.datum, e.dauer_min, s.name, s.met_wert, s.code, "
+                "s.kategorie, s.quelle "
+                "FROM sporteinheit e JOIN sportart s ON s.sportart_id = e.sportart_id "
+                "WHERE e.profil_id = ? AND e.datum BETWEEN ? AND ? "
+                "ORDER BY e.datum, e.einheit_id",
+                (profil_id, von.isoformat(), bis.isoformat()),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []  # sportart gibt es noch nicht, import_sportarten.py fehlt
+
+
 def sporteinheit_hinzufuegen(
     profil_id: int, datum: date, sportart_id: int, dauer_min: int
 ) -> int:
@@ -855,6 +925,16 @@ def gewichtsverlauf(profil_id: int, von: date | None = None) -> list[sqlite3.Row
             + bedingung
             + " ORDER BY datum",
             werte,
+        ).fetchall()
+
+
+def gewichte_zeitraum(profil_id: int, von: date, bis: date) -> list[sqlite3.Row]:
+    """Gewichtseinträge eines Zeitraums. Tage ohne Eintrag fehlen, nichts wird ergänzt."""
+    with verbindung() as con:
+        return con.execute(
+            "SELECT datum, gewicht_kg, notiz FROM gewicht "
+            "WHERE profil_id = ? AND datum BETWEEN ? AND ? ORDER BY datum",
+            (profil_id, von.isoformat(), bis.isoformat()),
         ).fetchall()
 
 

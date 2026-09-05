@@ -9,6 +9,7 @@ import streamlit as st
 from src import datenbank
 from src.seiten import (
     aktivitaet,
+    datenexport,
     gewicht,
     lebensmittel,
     mahlzeiten,
@@ -85,6 +86,7 @@ navigation = st.navigation(
             icon="📊",
             url_path="tagesuebersicht",
         ),
+        st.Page(datenexport.seite, title="Datenexport", icon="📦", url_path="export"),
     ]
 )
 navigation.run()
