@@ -31,8 +31,8 @@ def _kcal(wert: float) -> str:
     return f"{wert:.0f} kcal"
 
 
-def _energie(summe: float, abdeckung: int) -> str:
-    """Ohne einen einzigen bekannten Wert ist die Summe unbekannt, nicht 0."""
+def _energie(summe: float, abdeckung: float) -> str:
+    """Ohne abgedeckte Menge ist die Summe unbekannt, nicht 0."""
     return _kcal(summe) if abdeckung else "unbekannt"
 
 
@@ -49,7 +49,7 @@ def _aufnahme(profil_id: int, datum: date) -> dict:
         je_mahlzeit.setdefault(zeile["tagesabschnitt"], []).append(zeile)
 
     alle = [(zeile["lebensmittel_id"], zeile["menge_g"]) for zeile in positionen]
-    summen, abdeckung = berechnung.naehrwertsummen(
+    summen, abdeckung, gesamtmenge = berechnung.naehrwertsummen(
         alle, werte, CODES, datenbank.BEZUGSMENGE_G
     )
 
@@ -58,7 +58,7 @@ def _aufnahme(profil_id: int, datum: date) -> dict:
         zeilen = je_mahlzeit.get(abschnitt)
         if not zeilen:
             continue
-        m_summen, m_abdeckung = berechnung.naehrwertsummen(
+        m_summen, m_abdeckung, m_menge = berechnung.naehrwertsummen(
             [(z["lebensmittel_id"], z["menge_g"]) for z in zeilen],
             werte,
             CODES,
@@ -70,6 +70,14 @@ def _aufnahme(profil_id: int, datum: date) -> dict:
                 "positionen": zeilen,
                 "summen": m_summen,
                 "abdeckung": m_abdeckung,
+                "menge_g": m_menge,
+                # Zahl der Positionen ohne Kalorienwert. Sie steht neben der
+                # Abdeckung, weil die Spalte ausdrücklich Positionen zählt.
+                "ohne_energie": sum(
+                    1
+                    for z in zeilen
+                    if werte.get((z["lebensmittel_id"], ENERGIE)) is None
+                ),
             }
         )
 
@@ -78,7 +86,10 @@ def _aufnahme(profil_id: int, datum: date) -> dict:
         "mahlzeiten": mahlzeiten,
         "summen": summen,
         "abdeckung": abdeckung,
-        "ohne_energie": len(positionen) - abdeckung[ENERGIE],
+        "menge_g": gesamtmenge,
+        "ohne_energie": sum(
+            1 for z in positionen if werte.get((z["lebensmittel_id"], ENERGIE)) is None
+        ),
         # Ohne erfasste Position oder ohne einen einzigen Kalorienwert ist die
         # Aufnahme unbekannt. Unbekannt ist nicht null.
         "bekannt": abdeckung[ENERGIE] > 0,
@@ -219,7 +230,7 @@ def _mahlzeiten(aufnahme: dict) -> None:
 
     for mahlzeit in aufnahme["mahlzeiten"]:
         anzahl = len(mahlzeit["positionen"])
-        ohne = anzahl - mahlzeit["abdeckung"][ENERGIE]
+        ohne = mahlzeit["ohne_energie"]
         zeile = st.columns([2.2, 1.4, 1.4, 2.0])
         zeile[0].write(ABSCHNITT_ANZEIGE[mahlzeit["abschnitt"]])
         zeile[1].write(f"{anzahl}")
@@ -250,7 +261,7 @@ def _makros(aufnahme: dict) -> None:
         return
 
     stammdaten = datenbank.naehrstoffe(CODES)
-    gesamt = len(aufnahme["positionen"])
+    gesamtmenge = aufnahme["menge_g"]
     anzeige = dict(ANZEIGE_NAEHRSTOFFE)
 
     spalten = st.columns(len(MAKROS))
@@ -261,7 +272,8 @@ def _makros(aufnahme: dict) -> None:
             spalte.metric(anzeige[code], "unbekannt")
         else:
             spalte.metric(anzeige[code], f"{aufnahme['summen'][code]:.1f} {einheit}")
-        spalte.caption(f"aus {aufnahme['abdeckung'][code]} von {gesamt}")
+        # Abdeckung als Mengenanteil: 200 g ohne Wert wiegen schwerer als 5 g.
+        spalte.caption(berechnung.abdeckungstext(aufnahme["abdeckung"][code], gesamtmenge))
 
 
 # --------------------------------------------------------------------------- #
@@ -284,13 +296,18 @@ def _referenztext(referenz: float | None, obergrenze: float | None, einheit: str
     return "–"
 
 
-def _vergleichszeilen(referenzen: list, werte: dict, positionen: int, gewicht_kg: float | None):
-    """Baut je Nährstoff eine Zeile aus Zufuhr, Referenzwert und Einstufung."""
+def _vergleichszeilen(
+    referenzen: list, werte: dict, gesamtmenge: float, gewicht_kg: float | None
+):
+    """Baut je Nährstoff eine Zeile aus Zufuhr, Referenzwert und Einstufung.
+
+    werte: BLS-Code -> (Summe, abgedeckte Menge in Gramm).
+    """
     zeilen = []
     for referenz in referenzen:
         if referenz["bezug"] in NICHT_VERGLEICHEN:
             continue
-        summe, mit_wert = werte.get(referenz["bls_spalte"], (None, 0))
+        summe, mit_wert = werte.get(referenz["bls_spalte"], (None, 0.0))
         sollwert = berechnung.referenz_je_gewicht(
             referenz["wert"], referenz["bezug"], gewicht_kg
         )
@@ -305,7 +322,7 @@ def _vergleichszeilen(referenzen: list, werte: dict, positionen: int, gewicht_kg
                 "einheit": referenz["einheit"],
                 "zufuhr": summe,
                 "abdeckung": mit_wert,
-                "positionen": positionen,
+                "menge_g": gesamtmenge,
                 "referenz": sollwert,
                 "obergrenze": obergrenze,
                 "art": referenz["art"],
@@ -365,7 +382,7 @@ def _vergleichstabelle(zeilen: list) -> None:
     breiten = [2.6, 1.5, 1.7, 2.2, 1.5, 1.3]
     kopf = st.columns(breiten)
     for spalte, text in zip(
-        kopf, ("Nährstoff", "Zufuhr", "Referenzwert", "Einstufung", "Art", "Abdeckung")
+        kopf, ("Nährstoff", "Zufuhr", "Referenzwert", "Einstufung", "Art", "Abdeckung Menge")
     ):
         spalte.caption(text)
     for zeile in zeilen:
@@ -378,7 +395,9 @@ def _vergleichstabelle(zeilen: list) -> None:
         spalten[2].write(_referenztext(zeile["referenz"], zeile["obergrenze"], zeile["einheit"]))
         spalten[3].write(berechnung.EINSTUFUNG_ANZEIGE[zeile["einstufung"]])
         spalten[4].write(zeile["art"] or "–")
-        spalten[5].write(f"{zeile['abdeckung']} von {zeile['positionen']}")
+        spalten[5].write(
+            berechnung.abdeckungstext(zeile["abdeckung"], zeile["menge_g"], kurz=True)
+        )
 
 
 def _vergleich(
@@ -405,14 +424,14 @@ def _vergleich(
     werte_roh = datenbank.naehrwerte(
         [p["lebensmittel_id"] for p in aufnahme["positionen"]], codes
     )
-    summen, abdeckung = berechnung.naehrwertsummen(
+    summen, abdeckung, gesamtmenge = berechnung.naehrwertsummen(
         [(p["lebensmittel_id"], p["menge_g"]) for p in aufnahme["positionen"]],
         werte_roh,
         codes,
         datenbank.BEZUGSMENGE_G,
     )
     werte = {code: (summen[code], abdeckung[code]) for code in codes}
-    zeilen = _vergleichszeilen(referenzen, werte, len(aufnahme["positionen"]), gewicht_kg)
+    zeilen = _vergleichszeilen(referenzen, werte, gesamtmenge, gewicht_kg)
 
     st.caption(
         f"Altersgruppe {alter} Jahre, {'männlich' if eintrag['geschlecht'] == 'm' else 'weiblich'}. "
@@ -421,6 +440,11 @@ def _vergleich(
             if gewicht_kg
             else "Für Werte je Kilogramm Körpergewicht fehlt das Gewicht."
         )
+    )
+    st.caption(
+        f"Die Spalte Abdeckung Menge nennt den Anteil der erfassten Menge von "
+        f"{gesamtmenge:.0f} g, für den ein Wert vorliegt — nicht den Anteil der "
+        "Lebensmittel. Liegt für keine Position ein Wert vor, ist keine Aussage möglich."
     )
 
     for titel, unterabschnitte in _abschnitte(zeilen):
@@ -471,8 +495,11 @@ def _wochenauswertung(profil_id: int, datum: date, referenzen: list) -> None:
         tage_mit_aussage = 0
         tage_unterhalb = 0
         for eintrag in je_tag.values():
-            summe, mit_wert = eintrag["werte"].get(referenz["bls_spalte"], (None, 0))
-            urteil = berechnung.einstufung(summe, sollwert, obergrenze, mit_wert)
+            # Abdeckung als Menge in Gramm; ohne abgedeckte Menge keine Aussage.
+            summe, menge_mit_wert, _ = eintrag["werte"].get(
+                referenz["bls_spalte"], (None, 0.0, 0)
+            )
+            urteil = berechnung.einstufung(summe, sollwert, obergrenze, menge_mit_wert)
             if urteil == berechnung.KEINE_AUSSAGE:
                 continue
             tage_mit_aussage += 1

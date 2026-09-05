@@ -468,22 +468,26 @@ def referenzwert_quelle() -> sqlite3.Row | None:
 def aufnahme_je_tag(profil_id: int, von: date, bis: date) -> dict[str, dict]:
     """Zufuhr je Tag und Nährstoff im Zeitraum, einschließlich beider Ränder.
 
-    Rückgabe je Datum: Anzahl der Positionen und je BLS-Code die Summe sowie
-    die Zahl der Positionen mit bekanntem Wert. Tage ohne Mahlzeit fehlen ganz;
-    sie sind unbekannt, nicht null.
+    Rückgabe je Datum: Anzahl der Positionen, die erfasste Gesamtmenge und je
+    BLS-Code ein Tripel aus Summe, abgedeckter Menge in Gramm und der Zahl der
+    Positionen mit bekanntem Wert. Maßgeblich für die Abdeckung ist die Menge,
+    die Zahl der Positionen wird nur noch dort verwendet, wo ausdrücklich von
+    Positionen die Rede ist. Tage ohne Mahlzeit fehlen ganz; sie sind unbekannt,
+    nicht null.
     """
     grenzen = (profil_id, von.isoformat(), bis.isoformat())
     with verbindung() as con:
         try:
             positionen = con.execute(
-                "SELECT m.datum, COUNT(*) AS anzahl FROM mahlzeit m "
+                "SELECT m.datum, COUNT(*) AS anzahl, SUM(p.menge_g) AS menge FROM mahlzeit m "
                 "JOIN mahlzeit_position p ON p.mahlzeit_id = m.mahlzeit_id "
                 "WHERE m.profil_id = ? AND m.datum BETWEEN ? AND ? GROUP BY m.datum",
                 grenzen,
             ).fetchall()
             summen = con.execute(
                 "SELECT m.datum, n.bls_spalte, "
-                "SUM(w.wert_je_100g * p.menge_g / ?) AS summe, COUNT(*) AS mit_wert "
+                "SUM(w.wert_je_100g * p.menge_g / ?) AS summe, "
+                "SUM(p.menge_g) AS menge_mit_wert, COUNT(*) AS positionen_mit_wert "
                 "FROM mahlzeit m JOIN mahlzeit_position p ON p.mahlzeit_id = m.mahlzeit_id "
                 "JOIN naehrwert w ON w.lebensmittel_id = p.lebensmittel_id "
                 "JOIN naehrstoff n ON n.naehrstoff_id = w.naehrstoff_id "
@@ -494,12 +498,22 @@ def aufnahme_je_tag(profil_id: int, von: date, bis: date) -> dict[str, dict]:
         except sqlite3.OperationalError:
             return {}  # naehrwert oder lebensmittel fehlen, import_bls.py fehlt
 
+    leer = {"positionen": 0, "menge_g": 0.0, "werte": {}}
     je_tag = {
-        zeile["datum"]: {"positionen": zeile["anzahl"], "werte": {}} for zeile in positionen
+        zeile["datum"]: {
+            "positionen": zeile["anzahl"],
+            "menge_g": zeile["menge"] or 0.0,
+            "werte": {},
+        }
+        for zeile in positionen
     }
     for zeile in summen:
-        eintrag = je_tag.setdefault(zeile["datum"], {"positionen": 0, "werte": {}})
-        eintrag["werte"][zeile["bls_spalte"]] = (zeile["summe"], zeile["mit_wert"])
+        eintrag = je_tag.setdefault(zeile["datum"], dict(leer, werte={}))
+        eintrag["werte"][zeile["bls_spalte"]] = (
+            zeile["summe"],
+            zeile["menge_mit_wert"] or 0.0,
+            zeile["positionen_mit_wert"],
+        )
     return je_tag
 
 

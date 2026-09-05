@@ -164,13 +164,15 @@ def einstufung(
     zufuhr: float | None,
     referenz: float | None,
     obergrenze: float | None,
-    abdeckung: int,
+    abdeckung: float,
 ) -> str:
     """Vergleicht die Zufuhr mit dem Referenzwert.
 
-    Ohne einen einzigen bekannten Wert (Abdeckung null) oder ohne Referenzwert
-    ist keine Aussage möglich. Ist nur eine Obergrenze hinterlegt, entfällt die
-    Einstufung "unterhalb": ohne Referenzwert gibt es keine Untergrenze.
+    abdeckung ist die Menge in Gramm, für die ein Wert vorliegt. Ist sie null,
+    liegt für keine Position ein Wert vor und es ist keine Aussage möglich, auch
+    nicht "unterhalb des Referenzwerts". Dasselbe gilt ohne Referenzwert. Ist nur
+    eine Obergrenze hinterlegt, entfällt die Einstufung "unterhalb": ohne
+    Referenzwert gibt es keine Untergrenze.
     """
     if abdeckung <= 0 or zufuhr is None or (referenz is None and obergrenze is None):
         return KEINE_AUSSAGE
@@ -234,23 +236,71 @@ def naehrwertsummen(
     werte: dict[tuple[int, str], float],
     codes: tuple[str, ...],
     bezugsmenge_g: float,
-) -> tuple[dict[str, float], dict[str, int]]:
-    """Summiert Nährwerte über Positionen und zählt mit, worauf die Summe beruht.
+) -> tuple[dict[str, float], dict[str, float], float]:
+    """Summiert Nährwerte über Positionen und misst, worauf die Summe beruht.
 
     positionen: (lebensmittel_id, menge_g). werte: (lebensmittel_id, code) -> Wert
     je Bezugsmenge; fehlt der Schlüssel, ist der Wert unbekannt und geht nicht
     als 0 in die Summe ein.
 
-    Gibt (Summen, Abdeckung) zurück, Abdeckung als Anzahl der Positionen mit
-    bekanntem Wert je Nährstoff.
+    Gibt (Summen, Abdeckung, Gesamtmenge) zurück. Die Abdeckung ist je Nährstoff
+    die Menge in Gramm, für die ein Wert vorliegt, nicht die Zahl der Positionen:
+    200 Gramm ohne Nährwert wiegen für die Aussagekraft einer Summe schwerer als
+    5 Gramm. Ein ausdrücklich erfasster Nullwert zählt als vorhanden, weil dazu
+    eine Zeile in naehrwert steht.
     """
     summen = {code: 0.0 for code in codes}
-    abdeckung = {code: 0 for code in codes}
+    abdeckung = {code: 0.0 for code in codes}
+    gesamtmenge = 0.0
     for lebensmittel_id, menge_g in positionen:
+        gesamtmenge += menge_g
         for code in codes:
             wert = werte.get((lebensmittel_id, code))
             if wert is None:
                 continue
             summen[code] += wert * menge_g / bezugsmenge_g
-            abdeckung[code] += 1
-    return summen, abdeckung
+            abdeckung[code] += menge_g
+    return summen, abdeckung, gesamtmenge
+
+
+def abdeckung_anteil(menge_mit_wert: float, menge_gesamt: float) -> float | None:
+    """Anteil der erfassten Menge mit vorhandenem Wert, 0 bis 1.
+
+    Ohne erfasste Menge gibt es keinen Anteil; dann ist nichts zu berechnen.
+    """
+    if not menge_gesamt:
+        return None
+    return menge_mit_wert / menge_gesamt
+
+
+def abdeckungstext(menge_mit_wert: float, menge_gesamt: float, kurz: bool = False) -> str:
+    """Formuliert die Abdeckung als Mengenanteil, nicht als Zahl der Lebensmittel.
+
+    Gerundet wird auf ganze Prozent. 100 Prozent erscheinen nur bei tatsächlich
+    lückenloser Abdeckung und 0 Prozent nur, wenn wirklich kein Wert vorliegt:
+    eine gerundete Anzeige darf eine Lücke nicht verschwinden lassen.
+    """
+    anteil = abdeckung_anteil(menge_mit_wert, menge_gesamt)
+    if anteil is None:
+        return "keine erfasste Menge"
+
+    prozent = round(anteil * 100)
+    if prozent == 100 and menge_mit_wert < menge_gesamt:
+        prozent = 99
+    if prozent == 0 and menge_mit_wert > 0:
+        prozent = 1
+
+    if kurz:
+        return f"{prozent} % ({_gramm(menge_mit_wert)})"
+    return (
+        f"{prozent} % der erfassten Menge, {_gramm(menge_mit_wert)} von "
+        f"{_gramm(menge_gesamt)}"
+    )
+
+
+def _gramm(wert: float) -> str:
+    """Ganze Gramm, mit Nachkommastelle nur dort, wo sie einen Unterschied macht.
+
+    Sonst stünde neben "99 %" zweimal dieselbe gerundete Menge.
+    """
+    return f"{wert:.0f} g" if abs(wert - round(wert)) < 0.05 else f"{wert:.1f} g"

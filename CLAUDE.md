@@ -9,8 +9,16 @@ Kein Cloud-Dienst, keine Nutzerkonten. Die App läuft ausschließlich lokal.
 1. **Unbekannt ist nicht null.** Fehlt ein Nährwert in der Quelle (Strich, TR, Angabe
    unterhalb der Nachweisgrenze), wird KEINE Zeile in `naehrwert` angelegt. Niemals 0
    einsetzen. Textmarker gehören nie in numerische Spalten.
-2. **Abdeckung ausweisen.** Bei jeder Nährstoffsumme wird mitgeführt, aus wie vielen der
-   erfassten Lebensmittel sie stammt.
+2. **Abdeckung ausweisen, als Mengenanteil.** Bei jeder Nährstoffsumme wird mitgeführt,
+   welcher Anteil der erfassten Menge in Gramm durch Positionen mit vorhandenem Wert
+   abgedeckt ist — nicht, wie viele Lebensmittel einen Wert haben. 200 Gramm ohne Nährwert
+   wiegen für die Aussagekraft einer Summe schwerer als 5 Gramm. Gerechnet wird je
+   Nährstoff: Menge aller Positionen mit Wert geteilt durch Menge aller Positionen; ein
+   ausdrücklich erfasster Nullwert zählt als vorhanden. Die Regel steht ausschließlich in
+   `berechnung.naehrwertsummen` und `berechnung.abdeckungstext`; Anzeigen berechnen sie
+   nicht selbst nach. Ausgewiesen wird der auf ganze Zahlen gerundete Prozentsatz mit der
+   zugrunde liegenden Menge, etwa „82 % der erfassten Menge, 410 g von 500 g". 100 Prozent
+   erscheinen nur bei lückenloser Abdeckung, 0 Prozent nur, wenn kein Wert vorliegt.
 3. **Verweis statt Zahl.** Gespeichert wird Lebensmittel plus Menge, nie der berechnete
    Nährwert. Nährwerte werden bei jeder Auswertung frisch nachgeschlagen.
 4. **Eine Einheit je Nährstoff.** Die Einheit steht ausschließlich in `naehrstoff`.
@@ -425,6 +433,11 @@ Position wird zusätzlich ausgewiesen, ob das Lebensmittel aus dem Datenbestand 
 selbst erfasst wurde. Die Nährwerte sind auf die erfasste Menge umgerechnet, die Einheit
 steht in der Spaltenüberschrift und kommt aus `naehrstoff`. Minuten sind als `erfasst` oder
 `berechnet` gekennzeichnet, die Restzeit ist immer berechnet.
+
+**Keine Abdeckung im Export.** Der Export gibt die Einzelwerte mit ihrer Herkunft aus; wer
+sie zusammenzählt, sieht die Lücken selbst. Die Spalten `positionen` und
+`positionen_mit_energiewert` in `tagesbedarf.csv` zählen ausdrücklich Positionen und sind
+keine Abdeckungsangabe.
 
 **Kinderprofil:** keine Kalorienbilanz und keine Zielwerte. `tagesbedarf.csv` wird nicht
 erzeugt und die Aktivität ohne Energiespalte ausgegeben; Arbeitsblöcke entstehen nicht,

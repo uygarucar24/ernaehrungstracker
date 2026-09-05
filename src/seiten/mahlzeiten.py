@@ -134,8 +134,14 @@ def _anzeige(profil_id: int, datum: date, tagesabschnitt: str) -> list:
     for stelle, (code, name) in enumerate(ANZEIGE_NAEHRSTOFFE, start=2):
         kopf[stelle].caption(name)
 
-    summen = {code: 0.0 for code in CODES}
-    abdeckung = {code: 0 for code in CODES}
+    # Summen und Abdeckung kommen aus berechnung.naehrwertsummen, damit die
+    # Regel zur Abdeckung nur an einer Stelle steht.
+    summen, abdeckung, gesamtmenge = berechnung.naehrwertsummen(
+        [(p["lebensmittel_id"], p["menge_g"]) for p in positionen],
+        werte,
+        CODES,
+        datenbank.BEZUGSMENGE_G,
+    )
 
     for position in positionen:
         zeile = st.columns(SPALTENBREITEN)
@@ -148,9 +154,9 @@ def _anzeige(profil_id: int, datum: date, tagesabschnitt: str) -> list:
                 # Unbekannt ist nicht null: kein Wert, keine 0, nicht in der Summe.
                 zeile[stelle].write("unbekannt")
                 continue
-            wert = wert_je_100g * position["menge_g"] / datenbank.BEZUGSMENGE_G
-            summen[code] += wert
-            abdeckung[code] += 1
+            wert = berechnung.menge_je_portion(
+                wert_je_100g, position["menge_g"], datenbank.BEZUGSMENGE_G
+            )
             zeile[stelle].write(_zahl(wert, stammdaten[code]["einheit"]))
 
         if zeile[7].button("✕", key=f"mz_loeschen_{position['position_id']}", help="Position entfernen"):
@@ -161,18 +167,23 @@ def _anzeige(profil_id: int, datum: date, tagesabschnitt: str) -> list:
 
     fuss = st.columns(SPALTENBREITEN)
     fuss[0].write("**Summe**")
-    fuss[1].write(f"**{sum(p['menge_g'] for p in positionen):.0f} g**")
+    fuss[1].write(f"**{gesamtmenge:.0f} g**")
     for stelle, (code, _) in enumerate(ANZEIGE_NAEHRSTOFFE, start=2):
         if abdeckung[code] == 0:
             fuss[stelle].write("**unbekannt**")
         else:
             fuss[stelle].write(f"**{_zahl(summen[code], stammdaten[code]['einheit'])}**")
-        fuss[stelle].caption(f"aus {abdeckung[code]} von {len(positionen)}")
+        fuss[stelle].caption(berechnung.abdeckungstext(abdeckung[code], gesamtmenge, kurz=True))
 
-    if any(abdeckung[code] < len(positionen) for code in CODES):
+    st.caption(
+        f"Die Prozentangabe unter der Summe ist die Abdeckung: der Anteil der erfassten "
+        f"Menge von {gesamtmenge:.0f} g, für den ein Nährwert vorliegt — nicht der Anteil "
+        "der Lebensmittel."
+    )
+    if any(abdeckung[code] < gesamtmenge for code in CODES):
         st.caption(
             "Fehlende Nährwerte sind als unbekannt ausgewiesen und gehen nicht "
-            "in die Summe ein. Die Summe deckt dann weniger Positionen ab."
+            "in die Summe ein. Die Summe deckt dann weniger Menge ab."
         )
     return positionen
 

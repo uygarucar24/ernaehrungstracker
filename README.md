@@ -144,7 +144,7 @@ ernaehrungstracker/
 | Seite | Inhalt |
 |---|---|
 | **Profilverwaltung** | Profil anlegen (erwachsen oder Kind), Ziel als Modus abnehmen / zunehmen / halten mit Tempo ohne Vorzeichen, Laktoseintoleranz; Wechsel zwischen Profilen |
-| **Mahlzeiten** | Datum und Tagesabschnitt wählen, Lebensmittel über Textsuche finden, Menge in Gramm erfassen; Werte je Position und Summe mit Angabe der Abdeckung, dazu die Prüfung auf hinterlegte Unverträglichkeiten |
+| **Mahlzeiten** | Datum und Tagesabschnitt wählen, Lebensmittel über Textsuche finden, Menge in Gramm erfassen; Werte je Position und Summe mit der Abdeckung als Mengenanteil, dazu die Prüfung auf hinterlegte Unverträglichkeiten |
 | **Lebensmittel** | Eigene Produkte mit Bezeichnung, Hersteller und Nährwertdeklaration erfassen, ändern und archivieren |
 | **Aktivität** | Schlaf, Tagestyp mit vorbelegten Arbeitszeiten, Sporteinheiten; Tagesbedarf mit Grundumsatz, Aktivitäts- und Sportanteil sowie vollständiger Aufschlüsselung des Tages |
 | **Gewicht** | Gewicht je Datum erfassen, Verlauf über vier Wochen, zwölf Monate oder gesamt, mit gleitendem Durchschnitt über ein Kalenderfenster von sieben Tagen |
@@ -212,7 +212,9 @@ Ausführlich in [CLAUDE.md](CLAUDE.md), in Kurzform:
 1. **Unbekannt ist nicht null.** Fehlt ein Wert in der Quelle (Strich, „TR", Angabe unter
    der Nachweisgrenze), entsteht keine Zeile und keine 0. Er wird als *unbekannt*
    ausgewiesen und geht nicht in Summen ein. Eine echte 0 aus der Quelle wird gespeichert.
-2. **Abdeckung ausweisen.** Jede Summe nennt, auf wie vielen Positionen sie beruht.
+2. **Abdeckung ausweisen, als Mengenanteil.** Jede Summe nennt, welcher Anteil der
+   erfassten Menge einen Wert hat, etwa „82 % der erfassten Menge, 410 g von 500 g" — nicht
+   die Zahl der Lebensmittel. 200 g ohne Nährwert wiegen schwerer als 5 g.
 3. **Verweis statt Zahl.** Gespeichert werden Lebensmittel und Menge, nie ein berechneter
    Nährwert. Die Werte werden bei jeder Anzeige frisch nachgeschlagen.
 4. **Berechnet, nachgeschlagen oder von der KI** bleiben in der Anzeige getrennt.

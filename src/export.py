@@ -380,7 +380,9 @@ def _bedarf(profil_id: int, von: date, bis: date) -> tuple[str, int]:
         positionen = tageswerte.get("positionen", 0)
         energie = tageswerte.get("werte", {}).get("ENERCC")
         # Ohne einen einzigen bekannten Kalorienwert ist die Aufnahme unbekannt.
-        aufgenommen, mit_wert = (energie[0], energie[1]) if energie else (None, 0)
+        # Ausgegeben wird die Zahl der Positionen mit Wert; die Abdeckung als
+        # Mengenanteil gehört in die Anzeige, nicht in den Export.
+        aufgenommen, mit_wert = (energie[0], energie[2]) if energie else (None, 0)
         differenz = ziel - aufgenommen if ziel is not None and aufgenommen is not None else None
 
         zeilen.append(
